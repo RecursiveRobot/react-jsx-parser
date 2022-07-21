@@ -962,7 +962,8 @@ describe('JsxParser Component', () => {
 			const bindings = {
 				array: [{ of: 'objects' }],
 				index: 0,
-				object: { with: { child: 'objects' } },
+				object: { with: { child: 'objects' }, and: "directMembers" },
+				accessor: { path: "and" }
 			}
 
 			test('can evaluate a.b.c', () => {
@@ -1012,6 +1013,14 @@ describe('JsxParser Component', () => {
 
 				expect(rendered.childNodes[0].textContent).toEqual(bindings.array[bindings.index].of)
 				expect(component.ParsedChildren[0].props.foo).toEqual(bindings.array[bindings.index].of)
+			})
+			test('can evaluate a[b[c]]]', () => {
+				const expression = 'object[accessor.path]'
+				const jsx = `<span foo={${expression}}>{${expression}}</span>`
+				const { rendered, component } = render(<JsxParser {...{ bindings, jsx }} />)
+
+				expect(rendered.childNodes[0].textContent).toEqual(bindings.object['and'])
+				expect(component.ParsedChildren[0].props.foo).toEqual(bindings.object['and'])
 			})
 			/* eslint-enable dot-notation,no-useless-concat */
 		})
@@ -1310,6 +1319,101 @@ describe('JsxParser Component', () => {
 				/>,
 			)
 			expect(html).toEqual('<p>from-container</p>')
+		})
+
+		it('supports nested arrow functions', () => {
+			const { rendered } = render(
+				<JsxParser
+					bindings={{
+						"columns": [
+							{
+								"heading": "Label",
+								"fieldName": "label"
+							},
+							{
+								"heading": "Value",
+								"fieldName": "value"
+							}
+						],
+						"rows": [
+							{
+								"label": "One",
+								"value": 1
+							},
+							{
+								"label": "Two",
+								"value": 2
+							},
+							{
+								"label": "Three",
+								"value": 3
+							}
+						]
+					}}
+					jsx={`
+					<table>
+						<thead>
+							<tr>
+								{ columns.map(column => <th>{column.heading}</th>) }
+							</tr>
+						</thead>
+						<tbody>
+							{ 
+								rows.map(row =>
+										<tr>
+											{
+												columns.map(column => <td>{row[column.fieldName]}</td>)
+											}
+										</tr>
+										)
+							}
+						</tbody>
+					</table>
+					`}
+				/>,
+			)
+
+			const table = rendered.children[0]
+			expect(table.nodeName).toEqual('TABLE')
+
+			const thead = table.children[0]
+			const headerRows = thead.children
+			expect(headerRows).toHaveLength(1)
+
+			const [headerRow] = headerRows
+			const [header1, header2] = headerRow.children
+			expect(header1.textContent).toEqual("Label")
+			expect(header2.textContent).toEqual("Value")
+
+			const tbody = table.children[1]
+			const rows = tbody.children
+			expect(rows).toHaveLength(3)
+
+			const [row1, row2, row3] = rows
+			expect(row1.nodeName).toEqual('TR')
+			expect(row1.children).toHaveLength(2)
+			expect(row2.nodeName).toEqual('TR')
+			expect(row2.children).toHaveLength(2)
+			expect(row3.nodeName).toEqual('TR')
+			expect(row3.children).toHaveLength(2)
+
+			const [cell1, cell2] = row1.children
+			expect(cell1.nodeName).toEqual('TD')
+			expect(cell1.textContent).toEqual('One')
+			expect(cell2.nodeName).toEqual('TD')
+			expect(cell2.textContent).toEqual('1')
+
+			const [cell3, cell4] = row2.children
+			expect(cell3.nodeName).toEqual('TD')
+			expect(cell3.textContent).toEqual('Two')
+			expect(cell4.nodeName).toEqual('TD')
+			expect(cell4.textContent).toEqual('2')
+
+			const [cell5, cell6] = row3.children
+			expect(cell5.nodeName).toEqual('TD')
+			expect(cell5.textContent).toEqual('Three')
+			expect(cell6.nodeName).toEqual('TD')
+			expect(cell6.textContent).toEqual('3')
 		})
 	})
 })
