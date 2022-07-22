@@ -962,8 +962,10 @@ describe('JsxParser Component', () => {
 			const bindings = {
 				array: [{ of: 'objects' }],
 				index: 0,
-				object: { with: { child: 'objects' }, and: "directMembers" },
-				accessor: { path: "and" }
+				object: { with: { child: 'objects' }, and: 'directMembers' },
+				accessor: { path: 'and' },
+				with: 'somethingElse',
+				object2: { with: 'with' }
 			}
 
 			test('can evaluate a.b.c', () => {
@@ -1021,6 +1023,14 @@ describe('JsxParser Component', () => {
 
 				expect(rendered.childNodes[0].textContent).toEqual(bindings.object['and'])
 				expect(component.ParsedChildren[0].props.foo).toEqual(bindings.object['and'])
+			})
+			test('can bind <A c={b.c}>', () => {
+				const expression = 'object2.with'
+				const jsx = `<span with={${expression}}>{${expression}}</span>`
+				const { rendered, component } = render(<JsxParser {...{ bindings, jsx }} />)
+
+				expect(rendered.childNodes[0].textContent).toEqual(bindings.object2['with'])
+				expect(component.ParsedChildren[0].props.with).toEqual(bindings.object2['with'])
 			})
 			/* eslint-enable dot-notation,no-useless-concat */
 		})

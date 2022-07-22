@@ -124,7 +124,7 @@ declare module 'acorn-jsx' {
 		computed: boolean;
 		name?: string;
 		object: Literal | MemberExpression;
-		property?: MemberExpression;
+		property?: Identifier | MemberExpression;
 		raw?: string;
 	}
 

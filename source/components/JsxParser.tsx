@@ -186,8 +186,13 @@ export default class JsxParser extends React.Component<TProps> {
 	#parseMemberExpression = (expression: AcornJSX.MemberExpression, scope?: Scope): any => {
 		// eslint-disable-next-line prefer-destructuring
 		let { object } = expression
-		const computedExpressionPath = expression.property && this.#parseExpression(expression.property, scope)
-		const path = [computedExpressionPath ?? expression.property?.name ?? JSON.parse(expression.property?.raw ?? '""')]
+
+		const getPath = (exp: AcornJSX.MemberExpression) =>
+			exp.property?.type === 'Identifier' ?
+				exp.property?.name :
+				this.#parseExpression(exp.property!, scope);
+
+		const path = [getPath(expression)]
 
 		if (expression.object.type !== 'Literal') {
 			while (object && ['MemberExpression', 'Literal'].includes(object?.type)) {
@@ -195,7 +200,7 @@ export default class JsxParser extends React.Component<TProps> {
 				if ((object as AcornJSX.MemberExpression).computed) {
 					path.unshift(this.#parseExpression(property!, scope))
 				} else {
-					path.unshift(property?.name ?? JSON.parse(property?.raw ?? '""'))
+					path.unshift(property?.name ?? JSON.parse((property as AcornJSX.MemberExpression)?.raw ?? '""'))
 				}
 
 				object = (object as AcornJSX.MemberExpression).object
