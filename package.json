@@ -1,6 +1,6 @@
 {
   "author": "Troy Alford",
-  "bugs": "https://github.com/TroyAlford/react-jsx-parser/issues",
+  "bugs": "https://github.com/RecursiveRobot/react-jsx-parser/issues",
   "description": "A React component which can parse JSX and output rendered React Components",
   "files": [
     "dist/"
@@ -12,9 +12,9 @@
   "license": "MIT",
   "main": "dist/umd/react-jsx-parser.min.js",
   "types": "dist/index.d.ts",
-  "name": "react-jsx-parser",
-  "repository": "TroyAlford/react-jsx-parser",
-  "version": "1.29.0",
+  "name": "@recursive-robot/react-jsx-parser",
+  "repository": "RecursiveRobot/react-jsx-parser",
+  "version": "1.30.0",
   "dependencies": {
     "@types/jsdom": "^16.2.6",
     "acorn": "^8.0.5",
