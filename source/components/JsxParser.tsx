@@ -188,9 +188,9 @@ export default class JsxParser extends React.Component<TProps> {
 		let { object } = expression
 
 		const getPath = (exp: AcornJSX.MemberExpression) =>
-			exp.property?.type === 'Identifier' ?
-				exp.property?.name :
-				this.#parseExpression(exp.property!, scope);
+			exp.computed ?
+				this.#parseExpression(exp.property!, scope) :
+				exp.property?.name;
 
 		const path = [getPath(expression)]
 

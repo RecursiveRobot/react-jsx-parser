@@ -965,9 +965,18 @@ describe('JsxParser Component', () => {
 				object: { with: { child: 'objects' }, and: 'directMembers' },
 				accessor: { path: 'and' },
 				with: 'somethingElse',
-				object2: { with: 'with' }
+				object2: { with: 'with' },
+				fieldName: 'and'
 			}
 
+			test('can evaluate a[b]', () => {
+				const expression = 'object[fieldName]'
+				const jsx = `<span foo={${expression}}>{${expression}}</span>`
+				const { rendered, component } = render(<JsxParser {...{ bindings, jsx }} />)
+
+				expect(rendered.childNodes[0].textContent).toEqual(bindings.object['and'])
+				expect(component.ParsedChildren[0].props.foo).toEqual(bindings.object['and'])
+			})
 			test('can evaluate a.b.c', () => {
 				const expression = 'object.with.child'
 				const jsx = `<span foo={${expression}}>{${expression}}</span>`
