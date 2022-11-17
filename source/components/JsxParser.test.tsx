@@ -966,7 +966,7 @@ describe('JsxParser Component', () => {
 				accessor: { path: 'and' },
 				with: 'somethingElse',
 				object2: { with: 'with' },
-				fieldName: 'and'
+				fieldName: 'and',
 			}
 
 			test('can evaluate a[b]', () => {
@@ -1293,6 +1293,20 @@ describe('JsxParser Component', () => {
 			expect(html).toMatch('<div class="jsx-parser"><div>Fury<p>Megeara</p></div></div>')
 		})
 
+		it('supports statements inside arrow function bodies', () => {
+			const { html } = render(
+				<JsxParser
+					components={{ Custom }}
+					bindings={{ a: 1, b: 2 }}
+					jsx={`{(() => {
+						const {a, b} = this;
+						return a + b;
+					})()}`}
+				/>,
+			)
+			expect(html).toMatch('<div class="jsx-parser">3</div>')
+		})
+
 		it('passes attributes', () => {
 			const PropTest = (props: { booleanAttribute: boolean}) => <>{`val:${props.booleanAttribute}`}</>
 			const { html, component } = render(
@@ -1344,30 +1358,30 @@ describe('JsxParser Component', () => {
 			const { rendered } = render(
 				<JsxParser
 					bindings={{
-						"columns": [
+						columns: [
 							{
-								"heading": "Label",
-								"fieldName": "label"
+								heading: 'Label',
+								fieldName: 'label',
 							},
 							{
-								"heading": "Value",
-								"fieldName": "value"
-							}
+								heading: 'Value',
+								fieldName: 'value',
+							},
 						],
-						"rows": [
+						rows: [
 							{
-								"label": "One",
-								"value": 1
+								label: 'One',
+								value: 1,
 							},
 							{
-								"label": "Two",
-								"value": 2
+								label: 'Two',
+								value: 2,
 							},
 							{
-								"label": "Three",
-								"value": 3
-							}
-						]
+								label: 'Three',
+								value: 3,
+							},
+						],
 					}}
 					jsx={`
 					<table>
@@ -1401,8 +1415,8 @@ describe('JsxParser Component', () => {
 
 			const [headerRow] = headerRows
 			const [header1, header2] = headerRow.children
-			expect(header1.textContent).toEqual("Label")
-			expect(header2.textContent).toEqual("Value")
+			expect(header1.textContent).toEqual('Label')
+			expect(header2.textContent).toEqual('Value')
 
 			const tbody = table.children[1]
 			const rows = tbody.children

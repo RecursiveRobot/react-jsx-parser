@@ -54,11 +54,14 @@ export default class JsxParser extends React.Component<TProps> {
 
 	private ParsedChildren: ParsedTree = null
 
+	#getRawTextForExpression?: (expression: AcornJSX.Expression) => string | null
+
 	#parseJSX = (jsx: string): JSX.Element | JSX.Element[] | null => {
 		const parser = Acorn.Parser.extend(AcornJSX.default({
 			autoCloseVoidElements: this.props.autoCloseVoidElements,
 		}))
 		const wrappedJsx = `<root>${jsx}</root>`
+		this.#getRawTextForExpression = (e: AcornJSX.Expression) => wrappedJsx.slice(e.start, e.end)
 		let parsed: AcornJSX.Expression[] = []
 		try {
 			// @ts-ignore - AcornJsx doesn't have typescript typings
@@ -173,6 +176,16 @@ export default class JsxParser extends React.Component<TProps> {
 			if (expression.async || expression.generator) {
 				this.props.onError?.(new Error('Async and generator arrow functions are not supported.'))
 			}
+
+			// Parse function body and construct a Function object
+			if (expression.body.type === 'BlockStatement') {
+				const paramNames = expression.params.map(p => p.name)
+				const body = this.#getRawTextForExpression?.(expression.body) ?? ''
+				// eslint-disable-next-line no-new-func
+				const functionClosure = new Function(...paramNames, body)
+				return functionClosure.bind(this.props.bindings)
+			}
+
 			return (...args: any[]) : any => {
 				const functionScope: Record<string, any> = scope ?? {}
 				expression.params.forEach((param, idx) => {
@@ -340,6 +353,7 @@ export default class JsxParser extends React.Component<TProps> {
 
 	render = (): JSX.Element => {
 		const jsx = (this.props.jsx || '').trim().replace(/<!DOCTYPE([^>]*)>/g, '')
+
 		this.ParsedChildren = this.#parseJSX(jsx)
 		const className = [...new Set(['jsx-parser', ...String(this.props.className).split(' ')])]
 			.filter(Boolean)

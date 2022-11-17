@@ -2,6 +2,7 @@
 declare module 'acorn-jsx' {
 	export interface BaseExpression {
 		start: number;
+		end: number;
 	}
 
 	export interface JSXAttribute extends BaseExpression {
@@ -17,7 +18,7 @@ declare module 'acorn-jsx' {
 		argument?: Expression;
 	}
 
-  export interface ArrowFunctionExpression extends BaseExpression {
+	export interface ArrowFunctionExpression extends BaseExpression {
 		type: 'ArrowFunctionExpression';
 		async: Boolean
 		generator: Boolean
@@ -82,6 +83,11 @@ declare module 'acorn-jsx' {
 		left: Expression;
 		operator: string;
 		right: Expression;
+	}
+
+	export interface BlockStatement extends BaseExpression {
+		type: 'BlockStatement';
+		end: number;
 	}
 
 	export interface CallExpression extends BaseExpression {
@@ -156,7 +162,7 @@ declare module 'acorn-jsx' {
 	export type Expression =
 		JSXAttribute | JSXAttributeExpression | JSXElement | JSXExpressionContainer |
 		JSXSpreadAttribute | JSXFragment | JSXText |
-		ArrayExpression | BinaryExpression | CallExpression | ConditionalExpression |
+		ArrayExpression | BinaryExpression | BlockStatement | CallExpression | ConditionalExpression |
 		ExpressionStatement | Identifier | Literal | LogicalExpression | MemberExpression |
 		ObjectExpression | TemplateElement | TemplateLiteral | UnaryExpression |
 		ArrowFunctionExpression
