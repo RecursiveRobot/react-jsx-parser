@@ -1,3 +1,4 @@
+/* eslint-disable linebreak-style */
 /* global JSX */
 import * as Acorn from 'acorn'
 import * as AcornJSX from 'acorn-jsx'
@@ -68,7 +69,7 @@ export default class JsxParser extends React.Component<TProps> {
 			parsed = parser.parse(wrappedJsx, { ecmaVersion: 'latest' })
 			// @ts-ignore - AcornJsx doesn't have typescript typings
 			parsed = parsed.body[0].expression.children || []
-		} catch (error) {
+		} catch (error: any) {
 			if (this.props.showWarnings) console.warn(error) // eslint-disable-line no-console
 			if (this.props.onError) this.props.onError(error)
 			if (this.props.renderError) {
@@ -200,10 +201,11 @@ export default class JsxParser extends React.Component<TProps> {
 		// eslint-disable-next-line prefer-destructuring
 		let { object } = expression
 
-		const getPath = (exp: AcornJSX.MemberExpression) =>
+		const getPath = (exp: AcornJSX.MemberExpression) =>	(
 			exp.computed ?
 				this.#parseExpression(exp.property!, scope) :
-				exp.property?.name;
+				exp.property?.name
+		)
 
 		const path = [getPath(expression)]
 
