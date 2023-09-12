@@ -143,14 +143,25 @@ export default class JsxParser extends React.Component<TProps> {
 			return expression.value
 		case 'LogicalExpression':
 			const left = this.#parseExpression(expression.left, scope)
+			const evaluateRightBranch = () => this.#parseExpression(expression.right, scope)
+
 			if (expression.operator === '||') {
-				return left || this.#parseExpression(expression.right, scope)
+				if (left) {
+					return left
+				}
+				return evaluateRightBranch()
 			}
 			if (expression.operator === '&&') {
-				return left && this.#parseExpression(expression.right, scope)
+				if (!left) {
+					return left
+				}
+				return evaluateRightBranch()
 			}
 			if (expression.operator === '??') {
-				return left ?? this.#parseExpression(expression.right, scope)
+				if (left !== null && left !== undefined) {
+					return left
+				}
+				return evaluateRightBranch()
 			}
 			return false
 		case 'MemberExpression':
