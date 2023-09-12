@@ -162,6 +162,39 @@ describe('JsxParser Component', () => {
 			expect(rendered.childNodes[0].textContent.trim()).toEqual('trueFallback')
 		})
 	})
+	describe('conditional ?? rendering', () => {
+		test.only('should handle null evaluative', () => {
+			const { component, rendered } = render(
+				<JsxParser
+					bindings={{ foo: 42, bar: null }}
+					jsx={`
+						<div nonCoalescingProp={foo ?? 'fooFallback'} coalescingProp={bar ?? 'barFallback'}>
+							{foo ?? 'fooFallback'}{bar ?? 'barFallback'}
+						</div>
+					`}
+				/>,
+			)
+			expect(component.ParsedChildren[0].props.nonCoalescingProp).toBe(42)
+			expect(component.ParsedChildren[0].props.coalescingProp).toBe('barFallback')
+			expect(rendered.childNodes[0].textContent.trim()).toEqual('42barFallback')
+		})
+
+		test('should handle undefined evaluative', () => {
+			const { component, rendered } = render(
+				<JsxParser
+					bindings={{ foo: 42 }}
+					jsx={`
+						<div nonCoalescingProp={foo ?? 'fooFallback'} coalescingProp={bar ?? 'barFallback'}>
+							{foo ?? 'fooFallback'}{bar ?? 'barFallback'}
+						</div>
+					`}
+				/>,
+			)
+			expect(component.ParsedChildren[0].props.nonCoalescingProp).toBe(42)
+			expect(component.ParsedChildren[0].props.coalescingProp).toBe('barFallback')
+			expect(rendered.childNodes[0].textContent.trim()).toEqual('42barFallback')
+		})
+	})
 	describe('basic rendering', () => {
 		test('renders non-React components', () => {
 			const { component, rendered } = render(
