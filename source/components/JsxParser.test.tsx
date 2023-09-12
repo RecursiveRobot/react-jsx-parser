@@ -163,7 +163,7 @@ describe('JsxParser Component', () => {
 		})
 	})
 	describe('conditional ?? rendering', () => {
-		test.only('should handle null evaluative', () => {
+		test('should handle null evaluative', () => {
 			const { component, rendered } = render(
 				<JsxParser
 					bindings={{ foo: 42, bar: null }}
