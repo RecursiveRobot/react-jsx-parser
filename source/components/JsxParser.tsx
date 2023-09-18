@@ -124,7 +124,6 @@ export default class JsxParser extends React.Component<TProps> {
 				if (this.props.showWarnings) {
 					console.warn(`The expression '${this.#getRawTextForExpression(expression)}' could not be resolved, resulting in an undefined return value.`) // eslint-disable-line no-console
 				}
-
 				return undefined
 			}
 			try {
