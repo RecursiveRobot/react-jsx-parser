@@ -205,9 +205,14 @@ export default class JsxParser extends React.Component<TProps> {
 			if (expression.body.type === 'BlockStatement') {
 				const paramNames = expression.params.map(p => p.name)
 				const body = this.#getRawTextForExpression(expression.body)
-				// eslint-disable-next-line no-new-func
-				const functionClosure = new Function(...paramNames, body)
-				return functionClosure.bind(this.props.bindings)
+				try {
+					// eslint-disable-next-line no-new-func
+					const functionClosure = new Function(...paramNames, body)
+					return functionClosure.bind(this.props.bindings)
+				} catch (error: any) {
+					this.props.onError?.(new Error(`Unable to parse function '${this.#getRawTextForExpression(expression)}': ${error}.`))
+					return undefined
+				}
 			}
 
 			return (...args: any[]) : any => {
