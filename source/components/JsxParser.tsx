@@ -121,7 +121,10 @@ export default class JsxParser extends React.Component<TProps> {
 		case 'CallExpression':
 			const parsedCallee = this.#parseExpression(expression.callee, scope)
 			if (parsedCallee === undefined) {
-				this.props.onError?.(new Error(`The expression '${expression.callee}' could not be resolved, resulting in an undefined return value.`))
+				if (this.props.showWarnings) {
+					console.warn(`The expression '${this.#getRawTextForExpression(expression)}' could not be resolved, resulting in an undefined return value.`) // eslint-disable-line no-console
+				}
+
 				return undefined
 			}
 			try {
