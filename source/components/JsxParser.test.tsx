@@ -1340,6 +1340,25 @@ describe('JsxParser Component', () => {
 			expect(html).toMatch('<div class="jsx-parser">3</div>')
 		})
 
+		it('should gracefully handle errors inside block-bodied arrow functions', () => {
+			const errorHandler = jest.fn(e => { console.log(e) })
+			const { html } = render(
+				<JsxParser
+					components={{ Custom }}
+					bindings={{
+						willThrowError: () => {
+							const error = this.doesNotExist.willThrowError
+							return error
+						},
+					}}
+					jsx="{willThrowError()}"
+					onError={errorHandler}
+				/>,
+			)
+			expect(errorHandler).toBeCalled()
+			expect(html).not.toBeNull()
+		})
+
 		it('passes attributes', () => {
 			const PropTest = (props: { booleanAttribute: boolean}) => <>{`val:${props.booleanAttribute}`}</>
 			const { html, component } = render(

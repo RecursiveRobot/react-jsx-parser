@@ -55,7 +55,7 @@ export default class JsxParser extends React.Component<TProps> {
 
 	private ParsedChildren: ParsedTree = null
 
-	#getRawTextForExpression?: (expression: AcornJSX.Expression) => string | null
+	#getRawTextForExpression: (expression: AcornJSX.Expression) => string = () => ''
 
 	#parseJSX = (jsx: string): JSX.Element | JSX.Element[] | null => {
 		const parser = Acorn.Parser.extend(AcornJSX.default({
@@ -121,12 +121,17 @@ export default class JsxParser extends React.Component<TProps> {
 		case 'CallExpression':
 			const parsedCallee = this.#parseExpression(expression.callee, scope)
 			if (parsedCallee === undefined) {
-				this.props.onError!(new Error(`The expression '${expression.callee}' could not be resolved, resulting in an undefined return value.`))
+				this.props.onError?.(new Error(`The expression '${expression.callee}' could not be resolved, resulting in an undefined return value.`))
 				return undefined
 			}
-			return parsedCallee(...expression.arguments.map(
-				arg => this.#parseExpression(arg, scope),
-			))
+			try {
+				return parsedCallee(...expression.arguments.map(
+					arg => this.#parseExpression(arg, scope),
+				))
+			} catch (error: any) {
+				this.props.onError?.(new Error(`Unable to call expression '${this.#getRawTextForExpression(expression)}': ${error}.`))
+				return undefined
+			}
 		case 'ConditionalExpression':
 			return this.#parseExpression(expression.test, scope)
 				? this.#parseExpression(expression.consequent, scope)
@@ -197,7 +202,7 @@ export default class JsxParser extends React.Component<TProps> {
 			// Parse function body and construct a Function object
 			if (expression.body.type === 'BlockStatement') {
 				const paramNames = expression.params.map(p => p.name)
-				const body = this.#getRawTextForExpression?.(expression.body) ?? ''
+				const body = this.#getRawTextForExpression(expression.body)
 				// eslint-disable-next-line no-new-func
 				const functionClosure = new Function(...paramNames, body)
 				return functionClosure.bind(this.props.bindings)
@@ -250,7 +255,7 @@ export default class JsxParser extends React.Component<TProps> {
 			return member
 		} catch {
 			const name = (object as AcornJSX.MemberExpression)?.name || 'unknown'
-			this.props.onError!(new Error(`Unable to parse ${name}["${path.join('"]["')}"]}`))
+			this.props.onError?.(new Error(`Unable to parse ${name}["${path.join('"]["')}"]}`))
 		}
 	}
 
