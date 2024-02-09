@@ -358,7 +358,7 @@ export default class JsxParser extends React.Component<TProps> {
 				) {
 					const value = this.#parseExpression(expr.argument!, scope)
 					if (typeof value === 'object') {
-						Object.keys(value).forEach(rawName => {
+						Object.keys(value || {}).forEach(rawName => {
 							const attributeName: string = ATTRIBUTES[rawName] || rawName
 							const matches = blacklistedAttrs.filter(re => re.test(attributeName))
 							if (matches.length === 0) {
