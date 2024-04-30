@@ -35,6 +35,7 @@
 		"react/prefer-stateless-function": "off",
 		"react/prop-types": "off",
 		"react/static-property-placement": "off",
-		"spaced-comment": "off"
+		"spaced-comment": "off",
+		"linebreak-style": "off"
 	}
 }
