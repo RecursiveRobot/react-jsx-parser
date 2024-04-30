@@ -208,7 +208,7 @@ export default class JsxParser extends React.Component<TProps> {
 				try {
 					// eslint-disable-next-line no-new-func
 					const functionClosure = new Function(...paramNames, body)
-					return functionClosure.bind(this.props.bindings)
+					return functionClosure.bind({ ...this.props.bindings, ...scope })
 				} catch (error: any) {
 					this.props.onError?.(new Error(`Unable to parse function '${this.#getRawTextForExpression(expression)}': ${error}.`))
 					return undefined

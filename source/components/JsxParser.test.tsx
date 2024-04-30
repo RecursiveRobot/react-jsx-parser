@@ -1340,6 +1340,17 @@ describe('JsxParser Component', () => {
 			expect(html).toMatch('<div class="jsx-parser">3</div>')
 		})
 
+		it('exposes the local scope to the arrow function', () => {
+			const { html } = render(
+				<JsxParser
+					components={{ Custom }}
+					bindings={{ items: [1, 2] }}
+					jsx="{items.map(item => <span>{(() => { return this.item; })()}</span>)}"
+				/>,
+			)
+			expect(html).toMatch('<div class="jsx-parser"><span>1</span><span>2</span></div>')
+		})
+
 		it('should gracefully handle errors inside block-bodied arrow functions', () => {
 			const errorHandler = jest.fn(e => { console.log(e) })
 			const { html } = render(
