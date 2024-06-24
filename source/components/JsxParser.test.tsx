@@ -995,7 +995,7 @@ describe('JsxParser Component', () => {
 			const bindings = {
 				array: [{ of: 'objects' }],
 				index: 0,
-				object: { with: { child: 'objects' }, and: 'directMembers' },
+				object: { with: { child: 'objects' }, and: 'directMembers', andAFunction: () => 'function' },
 				accessor: { path: 'and' },
 				with: 'somethingElse',
 				object2: { with: 'with' },
@@ -1018,6 +1018,14 @@ describe('JsxParser Component', () => {
 				expect(rendered.childNodes[0].textContent).toEqual(bindings.object.with.child)
 				expect(component.ParsedChildren[0].props.foo).toEqual(bindings.object.with.child)
 			})
+			test('can evaluate a?.b?.c', () => {
+				const expression = 'object?.with?.child'
+				const jsx = `<span foo={${expression}}>{${expression}}</span>`
+				const { rendered, component } = render(<JsxParser {...{ bindings, jsx }} />)
+
+				expect(rendered.childNodes[0].textContent).toEqual(bindings.object.with.child)
+				expect(component.ParsedChildren[0].props.foo).toEqual(bindings.object.with.child)
+			})
 			test('can evaluate a["b"].c', () => {
 				const expression = 'object["with"].child'
 				const jsx = `<span foo={${expression}}>{${expression}}</span>`
@@ -1025,6 +1033,30 @@ describe('JsxParser Component', () => {
 
 				expect(rendered.childNodes[0].textContent).toEqual(bindings.object['with'].child)
 				expect(component.ParsedChildren[0].props.foo).toEqual(bindings.object['with'].child)
+			})
+			test('can evaluate a?.["b"].c', () => {
+				const expression = 'object?.["with"].child'
+				const jsx = `<span foo={${expression}}>{${expression}}</span>`
+				const { rendered, component } = render(<JsxParser {...{ bindings, jsx }} />)
+
+				expect(rendered.childNodes[0].textContent).toEqual(bindings.object['with'].child)
+				expect(component.ParsedChildren[0].props.foo).toEqual(bindings.object['with'].child)
+			})
+			test('can evaluate a?.["b"]?.c', () => {
+				const expression = 'object?.["with"]?.child'
+				const jsx = `<span foo={${expression}}>{${expression}}</span>`
+				const { rendered, component } = render(<JsxParser {...{ bindings, jsx }} />)
+
+				expect(rendered.childNodes[0].textContent).toEqual(bindings.object['with'].child)
+				expect(component.ParsedChildren[0].props.foo).toEqual(bindings.object['with'].child)
+			})
+			test('can evaluate a?.withAFunction?.()', () => {
+				const expression = 'object?.andAFunction?.()'
+				const jsx = `<span foo={${expression}}>{${expression}}</span>`
+				const { rendered, component } = render(<JsxParser {...{ bindings, jsx }} />)
+
+				expect(rendered.childNodes[0].textContent).toEqual(bindings.object.andAFunction())
+				expect(component.ParsedChildren[0].props.foo).toEqual(bindings.object.andAFunction())
 			})
 			test('can evaluate a["b" + 1].c', () => {
 				const expression = 'object["wi" + "th"].child'

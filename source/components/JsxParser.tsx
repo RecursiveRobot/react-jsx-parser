@@ -134,6 +134,13 @@ export default class JsxParser extends React.Component<TProps> {
 				this.props.onError?.(new Error(`Unable to call expression '${this.#getRawTextForExpression(expression)}': ${error}.`))
 				return undefined
 			}
+		case 'ChainExpression':
+			try {
+				return this.#parseExpression(expression.expression, scope)
+			} catch (error: any) {
+				this.props.onError?.(new Error(`Unable to call expression '${this.#getRawTextForExpression(expression)}': ${error}.`))
+				return undefined
+			}
 		case 'ConditionalExpression':
 			return this.#parseExpression(expression.test, scope)
 				? this.#parseExpression(expression.consequent, scope)
@@ -255,7 +262,7 @@ export default class JsxParser extends React.Component<TProps> {
 			let parent = target
 			const member = path.reduce((value, next) => {
 				parent = value
-				return value[next]
+				return expression.optional ? value?.[next] : value[next]
 			}, target)
 			if (typeof member === 'function') return member.bind(parent)
 
