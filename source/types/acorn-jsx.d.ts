@@ -94,11 +94,12 @@ declare module 'acorn-jsx' {
 		type: 'CallExpression';
 		arguments: Expression[];
 		callee: Expression;
+		optional: boolean;
 	}
 
 	export interface ChainExpression extends BaseExpression {
 		type: 'ChainExpression';
-		expression: Expression;
+		expression: MemberExpression | CallExpression;
 	}
 
 	export interface ConditionalExpression extends BaseExpression {
@@ -137,7 +138,7 @@ declare module 'acorn-jsx' {
 		object: Literal | MemberExpression;
 		property?: Identifier | MemberExpression;
 		raw?: string;
-		optional?: boolean;
+		optional: boolean;
 	}
 
 	export interface ObjectExpression extends BaseExpression {
