@@ -49,9 +49,9 @@ Finally, a note about property bindings. The `JsxParser` can handle several type
  - named-value binding, such as `eventHandler={myEventHandler}` (note that this requires a match in `bindings`)
  - simple [single statement arrow expressions](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Arrow_functions#basic_syntax) `(item) => <p>{item.name}</p>`
 
-The component does support inline arrow function declarations, such as:
- - `onKeyPress={event => { /* do stuff */}}`
- - Function or arrow functions with bodies `() => { return <p>This will not work</p> }`
+This component also supports inline arrow function declarations (both expression-bodied and block-bodied), such as:
+ - `onClick={() => showToastNotification("Button clicked!") }`
+ - `onClick={() => { this.showToastNotification("Button clicked!); }}` (parser bindings and local scope are bound to the function execution context)
 
 ## Advanced Usage - Injecting Dynamic JSX
 ```javascript
