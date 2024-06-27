@@ -950,15 +950,27 @@ describe('JsxParser Component', () => {
 			expect(rendered.childNodes[0].textContent).toEqual('75')
 			expect(component.ParsedChildren[0].props.testProp).toEqual(60)
 		})
+		test('can execute unary plus operations on bindings', () => {
+			const { component } = render(<JsxParser jsx="<span testProp={+foo}>{ +foo }</span>" bindings={{ foo: 75 }} />)
+			expect(component.ParsedChildren[0].props.testProp).toEqual(75)
+		})
 		test('can execute unary negation operations', () => {
 			const { rendered, component } = render(<JsxParser jsx="<span testProp={-60}>{ -75 }</span>" />)
 			expect(rendered.childNodes[0].textContent).toEqual('-75')
 			expect(component.ParsedChildren[0].props.testProp).toEqual(-60)
 		})
+		test('can execute unary negation operations on bindings', () => {
+			const { component } = render(<JsxParser jsx="<span testProp={-foo}>{ -foo }</span>" bindings={{ foo: 75 }} />)
+			expect(component.ParsedChildren[0].props.testProp).toEqual(-75)
+		})
 		test('can execute unary NOT operations', () => {
 			const { rendered, component } = render(<JsxParser jsx={'<span testProp={!60}>{ !false && "Yes" }</span>'} />)
 			expect(rendered.childNodes[0].textContent).toEqual('Yes')
 			expect(component.ParsedChildren[0].props.testProp).toEqual(false)
+		})
+		test('can execute unary NOT operations on bindings', () => {
+			const { component } = render(<JsxParser jsx={'<span testProp={!foo}>{ !foo && "Yes" }</span>'} bindings={{ foo: false }} />)
+			expect(component.ParsedChildren[0].props.testProp).toEqual(true)
 		})
 		test('can evaluate > operator', () => {
 			const { rendered, component } = render(<JsxParser jsx={'<span testProp={1 > 2}>{1 > 2 || "Nope"}</span>'} />)

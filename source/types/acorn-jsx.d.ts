@@ -160,10 +160,13 @@ declare module 'acorn-jsx' {
 		quasis: Expression[];
 	}
 
+	export type UnaryOperator = '-' | '+' | '!' | '~' | 'typeof' | 'void' | 'delete'
+
 	export interface UnaryExpression extends BaseExpression {
 		type: 'UnaryExpression';
-		operator: string;
-		argument: { value: any };
+		operator: UnaryOperator;
+		prefix: boolean;
+		argument: Expression;
 	}
 
 	export type Expression =

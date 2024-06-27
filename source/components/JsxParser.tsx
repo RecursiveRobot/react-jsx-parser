@@ -198,9 +198,9 @@ export default class JsxParser extends React.Component<TProps> {
 				.join('')
 		case 'UnaryExpression':
 			switch (expression.operator) {
-			case '+': return expression.argument.value
-			case '-': return -expression.argument.value
-			case '!': return !expression.argument.value
+			case '+': return +this.#parseExpression(expression.argument, scope)
+			case '-': return -this.#parseExpression(expression.argument, scope)
+			case '!': return !this.#parseExpression(expression.argument, scope)
 			}
 			return undefined
 		case 'ArrowFunctionExpression':
