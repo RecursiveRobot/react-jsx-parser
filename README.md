@@ -1,17 +1,22 @@
-# react-jsx-parser [![CircleCI][circle-ci-badge]](https://circleci.com/gh/TroyAlford/react-jsx-parser) [![Version][npm-version]][npm-link] [![NPM Downloads][npm-downloads]][npm-link] [![License][npm-license]](https://github.com/TroyAlford/react-jsx-parser/blob/master/LICENSE)
+# react-jsx-parser [![Version][npm-version]][npm-link] [![NPM Downloads][npm-downloads]][npm-link] [![License][npm-license]](https://github.com/recursive-robot/react-jsx-parser/blob/master/LICENSE)
 
-[circle-ci-badge]: https://circleci.com/gh/TroyAlford/react-jsx-parser.svg?style=svg
-[npm-version]: https://img.shields.io/npm/v/react-jsx-parser.svg
-[npm-downloads]: https://img.shields.io/npm/dt/react-jsx-parser.svg
+[npm-version]: https://img.shields.io/npm/v/@recursive-robot/react-jsx-parser.svg
+[npm-downloads]: https://img.shields.io/npm/dt/@recursive-robot/react-jsx-parser.svg
 [npm-license]: https://img.shields.io/npm/l/react-jsx-parser.svg
 [npm-link]: https://www.npmjs.com/package/react-jsx-parser
 
-A React component which can parse JSX and output rendered React Components.
+A React component which can parse JSX and output rendered React Components.  This is a fork of [the original package](https://github.com/TroyAlford/react-jsx-parser) with support for function declarations and modern operators.
+
+## Installation
+
+```
+npm install @recursive-robot/react-jsx-parser
+```
 
 ## Basic Usage - Injecting JSX as a String
 ```javascript
 import React from 'react'
-import JsxParser from 'react-jsx-parser'
+import JsxParser from '@recursive-robot/react-jsx-parser'
 import Library from 'some-library-of-components'
 
 class InjectableComponent extends Component {
@@ -141,9 +146,3 @@ JsxParser.defaultProps = {
 }
 ```
 
-## Older Browser Support
-
-If your application needs to support older browsers, like `IE11`, import from `react-jsx-parser/dist/es5/react-jsx-parser.min.js`,
-which transpiles the `acorn-jsx` dependency down to ES5, and also adds additional polyfill support for code used in this package.
-
-**Note**: <u>not</u> recommended for implementations which only support modern browsers, as the ES5 version is roughly 30% larger.
