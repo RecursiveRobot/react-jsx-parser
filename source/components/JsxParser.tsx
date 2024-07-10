@@ -152,7 +152,8 @@ export default class JsxParser extends React.Component<TProps> {
 				return scope[expression.name]
 			}
 			return (this.props.bindings || {})[expression.name]
-
+		case 'ThisExpression':
+			return this.props.bindings
 		case 'Literal':
 			return expression.value
 		case 'LogicalExpression':

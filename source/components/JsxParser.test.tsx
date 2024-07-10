@@ -1118,6 +1118,22 @@ describe('JsxParser Component', () => {
 				expect(rendered.childNodes[0].textContent).toEqual(bindings.object2['with'])
 				expect(component.ParsedChildren[0].props.with).toEqual(bindings.object2['with'])
 			})
+			test('can evaluate this.a[b]', () => {
+				const expression = 'this.object[fieldName]'
+				const jsx = `<span foo={${expression}}>{${expression}}</span>`
+				const { rendered, component } = render(<JsxParser {...{ bindings, jsx }} />)
+
+				expect(rendered.childNodes[0].textContent).toEqual(bindings.object['and'])
+				expect(component.ParsedChildren[0].props.foo).toEqual(bindings.object['and'])
+			})
+			test('can evaluate this?.a?.[b]', () => {
+				const expression = 'this?.object?.[fieldName]'
+				const jsx = `<span foo={${expression}}>{${expression}}</span>`
+				const { rendered, component } = render(<JsxParser {...{ bindings, jsx }} />)
+
+				expect(rendered.childNodes[0].textContent).toEqual(bindings.object['and'])
+				expect(component.ParsedChildren[0].props.foo).toEqual(bindings.object['and'])
+			})
 			/* eslint-enable dot-notation,no-useless-concat */
 		})
 	})
