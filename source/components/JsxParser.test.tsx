@@ -1360,8 +1360,8 @@ describe('JsxParser Component', () => {
 		})
 	})
 
-	describe('Functions', () => {
-		it('supports nested jsx inside arrow functions', () => {
+	describe('functions', () => {
+		it('support nested jsx inside arrow functions', () => {
 			// see
 			// https://astexplorer.net/#/gist/fc48b12b8410a4ef779e0477a644bb06/cdbfc8b929b31e11e577dceb88e3a1ee9343f68e
 			// for acorn AST
@@ -1375,7 +1375,7 @@ describe('JsxParser Component', () => {
 			expect(html).toMatch('<div class="jsx-parser"><div><p>1</p></div><div><p>2</p></div></div>')
 		})
 
-		it('supports JSX expressions inside arrow functions', () => {
+		it('support JSX expressions inside arrow functions', () => {
 			const { html } = render(
 				<JsxParser
 					components={{ Custom }}
@@ -1386,7 +1386,7 @@ describe('JsxParser Component', () => {
 			expect(html).toMatch('<div class="jsx-parser"><div>Fury<p>Megeara</p></div></div>')
 		})
 
-		it('supports statements inside arrow function bodies', () => {
+		it('support statements inside arrow function bodies', () => {
 			const { html } = render(
 				<JsxParser
 					components={{ Custom }}
@@ -1400,7 +1400,7 @@ describe('JsxParser Component', () => {
 			expect(html).toMatch('<div class="jsx-parser">3</div>')
 		})
 
-		it('exposes the local scope to the arrow function', () => {
+		it('expose the local scope to the arrow function', () => {
 			const { html } = render(
 				<JsxParser
 					components={{ Custom }}
