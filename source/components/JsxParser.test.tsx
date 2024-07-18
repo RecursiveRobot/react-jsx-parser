@@ -1400,6 +1400,38 @@ describe('JsxParser Component', () => {
 			expect(html).toMatch('<div class="jsx-parser">3</div>')
 		})
 
+		it('invocation context cascades across nested calls', () => {
+			function getC() {
+				return this.c
+			}
+
+			const { html } = render(
+				<JsxParser
+					components={{ Custom }}
+					bindings={{ a: 1, b: 2, c: 3, getC }}
+					jsx={`{(() => {
+						const {a, b} = this;
+						return a + b + this.getC();
+					})()}`}
+				/>,
+			)
+			expect(html).toMatch('<div class="jsx-parser">6</div>')
+		})
+
+		it('allow invocation of standard library inside dynamically invoked instance', () => {
+			const { html } = render(
+				<JsxParser
+					components={{ Custom }}
+					bindings={{ a: 1, b: 2, c: 3 }}
+					jsx={`{(() => {
+						const {a, b, c} = this;
+						return Math.max(a, b, c);
+					})()}`}
+				/>,
+			)
+			expect(html).toMatch('<div class="jsx-parser">3</div>')
+		})
+
 		it('expose the local scope to the arrow function', () => {
 			const { html } = render(
 				<JsxParser
