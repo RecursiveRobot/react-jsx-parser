@@ -1432,6 +1432,21 @@ describe('JsxParser Component', () => {
 			expect(html).toMatch('<div class="jsx-parser">3</div>')
 		})
 
+		it('are scoped appropriately when assigned to an input property', () => {
+			const PropTest = ({ inputFunction }) => inputFunction(3)
+			const { html } = render(
+				<JsxParser
+					components={{ PropTest }}
+					bindings={{ a: 1, b: 2 }}
+					jsx={`<PropTest inputFunction={(c) => {
+						const { a, b } = this;
+						return a + b + c;
+					}} />`}
+				/>,
+			)
+			expect(html).toMatch('6')
+		})
+
 		it('expose the local scope to the arrow function', () => {
 			const { html } = render(
 				<JsxParser

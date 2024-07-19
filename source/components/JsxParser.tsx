@@ -8,6 +8,7 @@ import { canHaveChildren, canHaveWhitespace } from '../constants/specialTags'
 import { randomHash } from '../helpers/hash'
 import { parseStyle } from '../helpers/parseStyle'
 import { resolvePath } from '../helpers/resolvePath'
+import { createFunctionProxy } from '../helpers/functionProxy'
 
 type ParsedJSX = JSX.Element | boolean | string
 type ParsedTree = ParsedJSX | ParsedJSX[] | null
@@ -30,9 +31,6 @@ export type TProps = {
 	renderUnrecognized?: (tagName: string) => JSX.Element | null,
 }
 type Scope = Record<string, any>
-type AnnotatedFunction = Function & {
-	useDynamicBindingScope?: boolean
-}
 
 /* eslint-disable consistent-return */
 export default class JsxParser extends React.Component<TProps> {
@@ -131,13 +129,7 @@ export default class JsxParser extends React.Component<TProps> {
 			}
 			try {
 				const args = expression.arguments.map(arg => this.#parseExpression(arg, scope))
-				// Functions which use a dynamic binding scope (block-bodied arrow functions)
-				// will be invoked with the sum of the bindings and the current scope.  This
-				// gives us a poor-man's version of local scoping for these global functions...
-				const invocationScope =
-					(parsedCallee as AnnotatedFunction).useDynamicBindingScope ?
-						{ ...this.props.bindings, ...scope } :
-						undefined
+				const invocationScope =	{ ...this.props.bindings, ...scope }
 				return Reflect.apply(parsedCallee, invocationScope, args)
 			} catch (error: any) {
 				this.props.onError?.(new Error(`Unable to call expression '${this.#getRawTextForExpression(expression)}': ${error}.`))
@@ -205,15 +197,16 @@ export default class JsxParser extends React.Component<TProps> {
 				this.props.onError?.(new Error('Async and generator arrow functions are not supported.'))
 			}
 
-			// Parse function body and construct a Function object
+			// Parse function body and construct a Function objectnew
 			if (expression.body.type === 'BlockStatement') {
 				const paramNames = expression.params.map(p => p.name)
 				const body = this.#getRawTextForExpression(expression.body)
 				try {
-					// eslint-disable-next-line no-new-func
-					const functionClosure: AnnotatedFunction = new Function(...paramNames, body)
-					functionClosure.useDynamicBindingScope = true
-					return functionClosure
+					return createFunctionProxy(
+						// eslint-disable-next-line no-new-func
+						new Function(...paramNames, body),
+						{ ...this.props.bindings, ...scope },
+					)
 				} catch (error: any) {
 					this.props.onError?.(new Error(`Unable to parse function '${this.#getRawTextForExpression(expression)}': ${error}.`))
 					return undefined
