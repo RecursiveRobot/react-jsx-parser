@@ -289,11 +289,27 @@ describe('JsxParser Component', () => {
 					text: 'Test Text',
 				},
 			}
+			const third = {
+				callbackA: () => 'Result from callback A',
+				callbackB: () => 'Result from callback B',
+			}
+			const fourth = () => ({
+				foo: 'Foo from spread of function call',
+				bar: 'Bar from spread of function call',
+			})
 			const { component, rendered } = render(
 				<JsxParser
 					components={{ Custom }}
-					bindings={{ first, second }}
-					jsx="<Custom {...first} {...second.innerProps} {...{ text: 'Will Not Spread' }} />"
+					bindings={{ first, second, third, fourth }}
+					jsx={
+						'<Custom'
+						+ ' {...first}'
+						+ ' {...second.innerProps}'
+						+ " {...{ willSpread: 'Will Spread' }}"
+						+ ' alsoWillSpread={{ ...third }}'
+						+ ' {...fourth()}'
+						+ ' />'
+					}
 				/>,
 			)
 
@@ -306,6 +322,11 @@ describe('JsxParser Component', () => {
 			expect(custom instanceof Custom)
 			expect(custom.props.className).toEqual('blah')
 			expect(custom.props.text).toEqual('Test Text')
+			expect(custom.props.willSpread).toEqual('Will Spread')
+			expect(custom.props.alsoWillSpread.callbackA()).toEqual('Result from callback A')
+			expect(custom.props.alsoWillSpread.callbackB()).toEqual('Result from callback B')
+			expect(custom.props.foo).toEqual('Foo from spread of function call')
+			expect(custom.props.bar).toEqual('Bar from spread of function call')
 
 			const customNode = rendered.childNodes[0]
 			expect(customNode.nodeName).toEqual('DIV')
@@ -313,6 +334,59 @@ describe('JsxParser Component', () => {
 			const customHTML = rendered.childNodes[0].innerHTML
 			expect(customHTML).not.toMatch(/Will Be Overwritten/)
 			expect(customHTML).not.toMatch(/Will Not Spread/)
+		})
+		test('spread operator supports function calls', () => {
+			const { component, rendered } = render(
+				<JsxParser
+					components={{ Custom }}
+					bindings={{
+						foo: () => ({ text: 'Bar' }),
+						baz: () => ({ qux: 'Qux' }),
+					}}
+					jsx="<Custom {...foo()} {...baz()} />"
+				/>,
+			)
+
+			expect(rendered.classList.contains('jsx-parser')).toBeTruthy()
+
+			expect(component.ParsedChildren).toHaveLength(1)
+			expect(rendered.childNodes).toHaveLength(1)
+
+			const custom = component.ParsedChildren[0]
+			expect(custom instanceof Custom)
+			expect(custom.props.text).toEqual('Bar')
+			expect(custom.props.qux).toEqual('Qux')
+
+			const customNode = rendered.childNodes[0]
+			expect(customNode.nodeName).toEqual('DIV')
+			expect(customNode.textContent).toEqual('Bar')
+		})
+		test('spread operator supports IIFEs', () => {
+			const { component, rendered } = render(
+				<JsxParser
+					components={{ Custom }}
+					jsx={
+						'<Custom'
+						+ '{...(() => { return { text: "Bar" }; })()}'
+						+ '{...(() => { return { qux: "Qux" }; })()}'
+						+ '/>'
+					}
+				/>,
+			)
+
+			expect(rendered.classList.contains('jsx-parser')).toBeTruthy()
+
+			expect(component.ParsedChildren).toHaveLength(1)
+			expect(rendered.childNodes).toHaveLength(1)
+
+			const custom = component.ParsedChildren[0]
+			expect(custom instanceof Custom)
+			expect(custom.props.text).toEqual('Bar')
+			expect(custom.props.qux).toEqual('Qux')
+
+			const customNode = rendered.childNodes[0]
+			expect(customNode.nodeName).toEqual('DIV')
+			expect(customNode.textContent).toEqual('Bar')
 		})
 		test('renders custom components with nesting', () => {
 			const { component, rendered } = render(

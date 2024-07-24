@@ -10,6 +10,8 @@ import { parseStyle } from '../helpers/parseStyle'
 import { resolvePath } from '../helpers/resolvePath'
 import { createFunctionProxy } from '../helpers/functionProxy'
 
+type ObjectExpressionNode = AcornJSX.ObjectExpressionNode
+type ObjectExpressionSpreadElement = AcornJSX.ObjectExpressionSpreadElement
 type ParsedJSX = JSX.Element | boolean | string
 type ParsedTree = ParsedJSX | ParsedJSX[] | null
 export type TProps = {
@@ -31,6 +33,10 @@ export type TProps = {
 	renderUnrecognized?: (tagName: string) => JSX.Element | null,
 }
 type Scope = Record<string, any>
+
+function isSpreadElement(node: ObjectExpressionNode): node is ObjectExpressionSpreadElement {
+	return (node as ObjectExpressionSpreadElement).type === 'SpreadElement'
+}
 
 /* eslint-disable consistent-return */
 export default class JsxParser extends React.Component<TProps> {
@@ -172,7 +178,14 @@ export default class JsxParser extends React.Component<TProps> {
 		case 'ObjectExpression':
 			const object: Record<string, any> = {}
 			expression.properties.forEach(prop => {
-				object[prop.key.name! || prop.key.value!] = this.#parseExpression(prop.value, scope)
+				if (isSpreadElement(prop)) {
+					const result = this.#parseExpression(prop.argument, scope)
+					Object.entries(result || {}).forEach(([propName, propValue]) => {
+						object[propName] = propValue
+					})
+				} else {
+					object[prop.key.name! || prop.key.value!] = this.#parseExpression(prop.value, scope)
+				}
 			})
 			return object
 		case 'TemplateElement':
@@ -350,11 +363,9 @@ export default class JsxParser extends React.Component<TProps> {
 					if (matches.length === 0) {
 						props[attributeName] = value
 					}
-				} else if (
-					(expr.type === 'JSXSpreadAttribute' && expr.argument.type === 'Identifier')
-					|| expr.argument!.type === 'MemberExpression'
-				) {
-					const value = this.#parseExpression(expr.argument!, scope)
+				} else if (expr.type === 'JSXSpreadAttribute') {
+					const spreadExpr = expr.argument!
+					const value = this.#parseExpression(spreadExpr, scope)
 					if (typeof value === 'object') {
 						Object.keys(value || {}).forEach(rawName => {
 							const attributeName: string = ATTRIBUTES[rawName] || rawName

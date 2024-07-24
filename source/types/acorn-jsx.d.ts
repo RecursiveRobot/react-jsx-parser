@@ -145,12 +145,19 @@ declare module 'acorn-jsx' {
 		optional: boolean;
 	}
 
+	export interface ObjectExpressionNode {
+		key: { name?: string; value?: string },
+		value: Expression;
+	}
+
+	export interface ObjectExpressionSpreadElement extends ObjectExpressionNode {
+		type: 'SpreadElement',
+		argument: Expression;
+	}
+
 	export interface ObjectExpression extends BaseExpression {
 		type: 'ObjectExpression';
-		properties: [{
-			key: { name?: string; value?: string },
-			value: Expression;
-		}]
+		properties: ObjectExpressionNode[]
 	}
 
 	export interface TemplateElement extends BaseExpression {
