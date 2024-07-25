@@ -10,8 +10,6 @@ import { parseStyle } from '../helpers/parseStyle'
 import { resolvePath } from '../helpers/resolvePath'
 import { createFunctionProxy } from '../helpers/functionProxy'
 
-type ObjectExpressionNode = AcornJSX.ObjectExpressionNode
-type ObjectExpressionSpreadElement = AcornJSX.ObjectExpressionSpreadElement
 type ParsedJSX = JSX.Element | boolean | string
 type ParsedTree = ParsedJSX | ParsedJSX[] | null
 export type TProps = {
@@ -34,8 +32,8 @@ export type TProps = {
 }
 type Scope = Record<string, any>
 
-function isSpreadElement(node: ObjectExpressionNode): node is ObjectExpressionSpreadElement {
-	return (node as ObjectExpressionSpreadElement).type === 'SpreadElement'
+function isSpreadElement(node: AcornJSX.BaseExpression): node is AcornJSX.SpreadElement {
+	return (node as AcornJSX.SpreadElement).type === 'SpreadElement'
 }
 
 /* eslint-disable consistent-return */
@@ -184,7 +182,10 @@ export default class JsxParser extends React.Component<TProps> {
 						object[propName] = propValue
 					})
 				} else {
-					object[prop.key.name! || prop.key.value!] = this.#parseExpression(prop.value, scope)
+					const fieldName =
+						(prop.key as AcornJSX.Identifier).name ||
+						(prop.key as AcornJSX.Literal).value
+					object[fieldName] = this.#parseExpression(prop.value, scope)
 				}
 			})
 			return object
