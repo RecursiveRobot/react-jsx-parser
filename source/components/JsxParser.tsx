@@ -102,7 +102,18 @@ export default class JsxParser extends React.Component<TProps> {
 				? expression.value
 				: <Fragment key={key}>{expression.value}</Fragment>
 		case 'ArrayExpression':
-			return expression.elements.map(ele => this.#parseExpression(ele, scope)) as ParsedTree
+			const arr: any[] = [];
+			(expression.elements || []).forEach(el => {
+				if (isSpreadElement(el)) {
+					const values = this.#parseExpression(el.argument, scope)
+					if (values) arr.push(...values)
+					return
+				}
+
+				const value = this.#parseExpression(el, scope)
+				if (value !== undefined) arr.push(value)
+			})
+			return arr
 		case 'BinaryExpression':
 			/* eslint-disable eqeqeq,max-len */
 			switch (expression.operator) {

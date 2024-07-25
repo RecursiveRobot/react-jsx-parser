@@ -898,6 +898,46 @@ describe('JsxParser Component', () => {
 			)
 			expect(html).toEqual('<div>123</div>')
 		})
+		test('supports spread operator inside array values', () => {
+			const { html } = render(
+				<JsxParser
+					bindings={{ arr1: [1, 2, 3], arr2: [5, 6, 7] }}
+					jsx="<div>{[...arr1, 4, ...arr2]}</div>"
+					renderInWrapper={false}
+				/>,
+			)
+			expect(html).toEqual('<div>1234567</div>')
+		})
+		test('supports function invocation in array declarations', () => {
+			const { html } = render(
+				<JsxParser
+					bindings={{ arr1: () => [1, 2, 3], arr2: () => 4 }}
+					jsx="<div>{[...arr1(), arr2()]}</div>"
+					renderInWrapper={false}
+				/>,
+			)
+			expect(html).toEqual('<div>1234</div>')
+		})
+		test('supports mixed expression types inside array', () => {
+			const { html } = render(
+				<JsxParser
+					bindings={{ arr1: [1, 2, 3], arr2: () => 5, arr3: () => [6, 7, 8] }}
+					jsx="<div>{[...arr1, 4, arr2(), ...arr3()]}</div>"
+					renderInWrapper={false}
+				/>,
+			)
+			expect(html).toEqual('<div>12345678</div>')
+		})
+		test('supports function chaining on arrays', () => {
+			const { html } = render(
+				<JsxParser
+					bindings={{ arr1: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] }}
+					jsx="<ul>{[...arr1].filter(x => x % 2 === 0).map(x => <li>{x}</li>)}</ul>"
+					renderInWrapper={false}
+				/>,
+			)
+			expect(html).toEqual('<ul><li>2</li><li>4</li><li>6</li><li>8</li><li>10</li></ul>')
+		})
 		test('honors conditional rendering based on bound values', () => {
 			const logFn = () => { console.log('Foo!') }
 			const { component } = render(

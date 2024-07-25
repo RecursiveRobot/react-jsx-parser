@@ -79,7 +79,7 @@ declare module 'acorn-jsx' {
 
 	export interface ArrayExpression extends BaseExpression {
 		type: 'ArrayExpression';
-		elements: Expression[];
+		elements: Array<Expression | SpreadElement>;
 	}
 
 	export interface BinaryExpression extends BaseExpression {
