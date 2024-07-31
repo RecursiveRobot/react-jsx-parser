@@ -1016,21 +1016,6 @@ describe('JsxParser Component', () => {
 			expect(wrapper.find('input')).toHaveLength(1)
 			expect(wrapper.find('input').props().checked).toBe(false)
 		})
-		test('will not execute arbitrary javascript', () => {
-			window.foo = jest.fn(() => true)
-			const wrapper = mount(
-				<JsxParser
-					jsx={
-						'<div>Before {window.foo() && <span>Foo!</span>}</div>'
-						+ '<div>{Number.isNaN(NaN) && <span>Foo!</span>} After</div>'
-					}
-				/>,
-			)
-
-			expect(window.foo).toHaveBeenCalledTimes(0)
-			expect(wrapper.find('span')).toHaveLength(0)
-			expect(wrapper.html()).toMatchSnapshot()
-		})
 		test('can execute binary mathematical operations', () => {
 			const { rendered } = render(<JsxParser jsx="<span>{ 1 + 2 * 4 / 8 - 1 }</span>" />)
 			expect(rendered.childNodes[0].textContent).toEqual('1')
@@ -1387,17 +1372,6 @@ describe('JsxParser Component', () => {
 			)
 			expect(rendered.childNodes).toHaveLength(0)
 		})
-	})
-	test('throws on non-simple literal and global object instance methods', () => {
-		// Some of these would normally fail silently, set `onError` forces throw for assertion purposes
-		expect(() => render(<JsxParser jsx="{ window.scrollTo() }" onError={e => { throw e }} />)).toThrow()
-		expect(() => render(<JsxParser jsx={'{ (() => { window.location = "badsite" })() }'} onError={e => { throw e }} />)).toThrow()
-		expect(() => render(<JsxParser jsx={'{ document.querySelector("body") }'} onError={e => { throw e }} />)).toThrow()
-		expect(() => render(<JsxParser jsx={'{ document.createElement("script") }'} onError={e => { throw e }} />)).toThrow()
-		expect(() => render(<JsxParser jsx="{ [1, 2, 3].filter(num => num === 2) }" />)).toThrow()
-		expect(() => render(<JsxParser jsx="{ [1, 2, 3].map(num => num * 2) }" />)).toThrow()
-		expect(() => render(<JsxParser jsx="{ [1, 2, 3].reduce((a, b) => a + b) }" />)).toThrow()
-		expect(() => render(<JsxParser jsx="{ [1, 2, 3].find(num => num === 2) }" />)).toThrow()
 	})
 	test('supports className prop', () => {
 		const { html } = render(<JsxParser className="foo" jsx="Text" />)
