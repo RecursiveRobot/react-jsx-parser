@@ -183,6 +183,10 @@ export default class JsxParser extends React.Component<TProps> {
 			}
 		case 'MemberExpression':
 			return this.#parseMemberExpression(expression, scope)
+		case 'NewExpression':
+			const constructor = this.#parseExpression(expression.callee, scope)
+			// eslint-disable-next-line new-cap
+			return new constructor(...expression.arguments.map(a => this.#parseExpression(a, scope)))
 		case 'ObjectExpression':
 			const object: Record<string, any> = {}
 			expression.properties.forEach(prop => {

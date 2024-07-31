@@ -1612,6 +1612,16 @@ describe('JsxParser Component', () => {
 			expect(html).toEqual('<p>from-container</p>')
 		})
 
+		it('supports constructor calls', () => {
+			const { html } = render(
+				<JsxParser
+					components={{ Custom }}
+					jsx="<Custom>{new Date().getFullYear()}</Custom>"
+				/>,
+			)
+			expect(html).toMatch(new Date().getFullYear().toString())
+		})
+
 		it('supports nested arrow functions', () => {
 			const { rendered } = render(
 				<JsxParser

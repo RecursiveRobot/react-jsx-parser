@@ -185,13 +185,19 @@ declare module 'acorn-jsx' {
 		argument: Expression;
 	}
 
+	export interface NewExpression extends BaseExpression {
+		type: 'NewExpression';
+		callee: Expression;
+		arguments: any[];
+	}
+
 	export type Expression =
 		JSXAttribute | JSXAttributeExpression | JSXElement | JSXExpressionContainer |
 		JSXSpreadAttribute | JSXFragment | JSXText |
 		ArrayExpression | BinaryExpression | BlockStatement | CallExpression | ConditionalExpression |
 		ExpressionStatement | Identifier | Literal | ThisExpression | LogicalExpression |
 		MemberExpression | ObjectExpression | TemplateElement | TemplateLiteral | UnaryExpression |
-		ArrowFunctionExpression | ChainExpression
+		ArrowFunctionExpression | ChainExpression | NewExpression
 
 	interface PluginOptions {
 		allowNamespacedObjects?: boolean,
