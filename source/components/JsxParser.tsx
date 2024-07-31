@@ -114,6 +114,34 @@ export default class JsxParser extends React.Component<TProps> {
 				if (value !== undefined) arr.push(value)
 			})
 			return arr
+		case 'ArrowFunctionExpression':
+			if (expression.async || expression.generator) {
+				this.props.onError?.(new Error('Async and generator arrow functions are not supported.'))
+			}
+
+			// Parse function body and construct a Function objectnew
+			if (expression.body.type === 'BlockStatement') {
+				const paramNames = expression.params.map(p => p.name)
+				const body = this.#getRawTextForExpression(expression.body)
+				try {
+					return createFunctionProxy(
+						// eslint-disable-next-line no-new-func
+						new Function(...paramNames, body),
+						{ ...this.props.bindings, ...scope },
+					)
+				} catch (error: any) {
+					this.props.onError?.(new Error(`Unable to parse function '${this.#getRawTextForExpression(expression)}': ${error}.`))
+					return undefined
+				}
+			}
+
+			return (...args: any[]) : any => {
+				const functionScope: Record<string, any> = scope ?? {}
+				expression.params.forEach((param, idx) => {
+					functionScope[param.name] = args[idx]
+				})
+				return this.#parseExpression(expression.body, functionScope)
+			}
 		case 'BinaryExpression':
 			/* eslint-disable eqeqeq,max-len */
 			switch (expression.operator) {
@@ -167,8 +195,6 @@ export default class JsxParser extends React.Component<TProps> {
 			return scope?.[expression.name] ??
 				this.props.bindings?.[expression.name] ??
 				window[expression.name as any]
-		case 'ThisExpression':
-			return this.props.bindings
 		case 'Literal':
 			return expression.value
 		case 'LogicalExpression':
@@ -213,6 +239,8 @@ export default class JsxParser extends React.Component<TProps> {
 				})
 				.map(item => this.#parseExpression(item, scope))
 				.join('')
+		case 'ThisExpression':
+			return this.props.bindings
 		case 'UnaryExpression':
 			switch (expression.operator) {
 			case '+': return +this.#parseExpression(expression.argument, scope)
@@ -220,34 +248,6 @@ export default class JsxParser extends React.Component<TProps> {
 			case '!': return !this.#parseExpression(expression.argument, scope)
 			}
 			return undefined
-		case 'ArrowFunctionExpression':
-			if (expression.async || expression.generator) {
-				this.props.onError?.(new Error('Async and generator arrow functions are not supported.'))
-			}
-
-			// Parse function body and construct a Function objectnew
-			if (expression.body.type === 'BlockStatement') {
-				const paramNames = expression.params.map(p => p.name)
-				const body = this.#getRawTextForExpression(expression.body)
-				try {
-					return createFunctionProxy(
-						// eslint-disable-next-line no-new-func
-						new Function(...paramNames, body),
-						{ ...this.props.bindings, ...scope },
-					)
-				} catch (error: any) {
-					this.props.onError?.(new Error(`Unable to parse function '${this.#getRawTextForExpression(expression)}': ${error}.`))
-					return undefined
-				}
-			}
-
-			return (...args: any[]) : any => {
-				const functionScope: Record<string, any> = scope ?? {}
-				expression.params.forEach((param, idx) => {
-					functionScope[param.name] = args[idx]
-				})
-				return this.#parseExpression(expression.body, functionScope)
-			}
 		}
 	}
 

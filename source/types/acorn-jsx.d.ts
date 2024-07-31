@@ -18,16 +18,6 @@ declare module 'acorn-jsx' {
 		argument?: Expression;
 	}
 
-	export interface ArrowFunctionExpression extends BaseExpression {
-		type: 'ArrowFunctionExpression';
-		async: Boolean
-		generator: Boolean
-		expression: true;
-		argument?: Expression;
-		body: Expression
-		params: Identifier[]
-	}
-
 	export interface JSXFragment {
 		children: JSXElement[],
 		end: number,
@@ -73,13 +63,19 @@ declare module 'acorn-jsx' {
 		value: string;
 	}
 
-	export interface ThisExpression extends BaseExpression {
-		type: 'ThisExpression'
-	}
-
 	export interface ArrayExpression extends BaseExpression {
 		type: 'ArrayExpression';
 		elements: Array<Expression | SpreadElement>;
+	}
+
+	export interface ArrowFunctionExpression extends BaseExpression {
+		type: 'ArrowFunctionExpression';
+		async: Boolean
+		generator: Boolean
+		expression: true;
+		argument?: Expression;
+		body: Expression
+		params: Identifier[]
 	}
 
 	export interface BinaryExpression extends BaseExpression {
@@ -145,6 +141,12 @@ declare module 'acorn-jsx' {
 		optional: boolean;
 	}
 
+	export interface NewExpression extends BaseExpression {
+		type: 'NewExpression';
+		callee: Expression;
+		arguments: any[];
+	}
+
 	export interface Property extends BaseExpression {
 		type: 'Property'
 		key: Expression
@@ -176,6 +178,10 @@ declare module 'acorn-jsx' {
 		quasis: Expression[];
 	}
 
+	export interface ThisExpression extends BaseExpression {
+		type: 'ThisExpression'
+	}
+
 	export type UnaryOperator = '-' | '+' | '!' | '~' | 'typeof' | 'void' | 'delete'
 
 	export interface UnaryExpression extends BaseExpression {
@@ -185,19 +191,32 @@ declare module 'acorn-jsx' {
 		argument: Expression;
 	}
 
-	export interface NewExpression extends BaseExpression {
-		type: 'NewExpression';
-		callee: Expression;
-		arguments: any[];
-	}
-
 	export type Expression =
-		JSXAttribute | JSXAttributeExpression | JSXElement | JSXExpressionContainer |
-		JSXSpreadAttribute | JSXFragment | JSXText |
-		ArrayExpression | BinaryExpression | BlockStatement | CallExpression | ConditionalExpression |
-		ExpressionStatement | Identifier | Literal | ThisExpression | LogicalExpression |
-		MemberExpression | ObjectExpression | TemplateElement | TemplateLiteral | UnaryExpression |
-		ArrowFunctionExpression | ChainExpression | NewExpression
+	| JSXAttribute
+	| JSXAttributeExpression
+	| JSXElement
+	| JSXExpressionContainer
+	| JSXSpreadAttribute
+	| JSXFragment
+	| JSXText
+	| ArrayExpression
+	| ArrowFunctionExpression
+	| BinaryExpression
+	| BlockStatement
+	| CallExpression
+	| ChainExpression
+	| ConditionalExpression
+	| ExpressionStatement
+	| Identifier
+	| Literal
+	| LogicalExpression
+	| MemberExpression
+	| NewExpression
+	| ObjectExpression
+	| ThisExpression
+	| TemplateElement
+	| TemplateLiteral
+	| UnaryExpression
 
 	interface PluginOptions {
 		allowNamespacedObjects?: boolean,
