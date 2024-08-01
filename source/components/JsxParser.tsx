@@ -119,10 +119,22 @@ export default class JsxParser extends React.Component<TProps> {
 				this.props.onError?.(new Error('Async and generator arrow functions are not supported.'))
 			}
 
-			// Parse function body and construct a Function objectnew
+			// Parse function body and construct a Function object
 			if (expression.body.type === 'BlockStatement') {
-				const paramNames = expression.params.map(p => p.name)
-				const body = this.#getRawTextForExpression(expression.body)
+				const paramNames = expression.params.map((param, index) => {
+					switch (param.type) {
+					case 'Identifier':	return param.name
+					case 'RestElement':	return `...${param.argument.name}`
+					default: return `arg_${index}`
+					}
+				})
+
+				// Anything other than straight pass-through of the function parameters
+				// requires wrapping the function in an IIFE to handle this mapping logic
+				const paramsRequirePreprocessing = expression.params.some(param => param.type !== 'Identifier')
+				const body = paramsRequirePreprocessing ?
+					`return (${this.#getRawTextForExpression(expression)})(${paramNames.join(', ')})` :
+					this.#getRawTextForExpression(expression.body)
 				try {
 					return createFunctionProxy(
 						// eslint-disable-next-line no-new-func
@@ -136,10 +148,7 @@ export default class JsxParser extends React.Component<TProps> {
 			}
 
 			return (...args: any[]) : any => {
-				const functionScope: Record<string, any> = scope ?? {}
-				expression.params.forEach((param, idx) => {
-					functionScope[param.name] = args[idx]
-				})
+				const functionScope: Record<string, any> = this.#getFunctionScope(scope, expression, args)
 				return this.#parseExpression(expression.body, functionScope)
 			}
 		case 'BinaryExpression':
@@ -403,6 +412,42 @@ export default class JsxParser extends React.Component<TProps> {
 		}
 
 		return React.createElement(component || lowerName, props, children)
+	}
+
+	#getFunctionScope = (
+		scope: Scope | undefined,
+		expression: AcornJSX.ArrowFunctionExpression,
+		args: any[],
+	): Scope => {
+		const functionScope: Record<string, any> = scope ?? {}
+		expression.params.forEach((param, idx) => {
+			switch (param.type) {
+			case 'Identifier':
+				functionScope[param.name] = args[idx]
+				break
+			case 'ArrayPattern':
+				param.elements.forEach((element, elemIdx) => {
+					if (element && element.type === 'Identifier') {
+						functionScope[element.name] = args[idx][elemIdx]
+					}
+					if (element && element.type === 'RestElement' && element.argument.type === 'Identifier') {
+						functionScope[element.argument.name] = args[idx].slice(elemIdx)
+					}
+				})
+				break
+			case 'ObjectPattern':
+				param.properties.forEach(property => {
+					if (property.type === 'Property' && property.key.type === 'Identifier' && property.value.type === 'Identifier') {
+						functionScope[property.value.name] = args[idx][property.key.name]
+					}
+				})
+				break
+			case 'RestElement':
+				functionScope[param.argument.name] = args.slice(idx)
+				break
+			}
+		})
+		return functionScope
 	}
 
 	render = (): JSX.Element => {

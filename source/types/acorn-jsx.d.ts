@@ -74,8 +74,8 @@ declare module 'acorn-jsx' {
 		generator: Boolean
 		expression: true;
 		argument?: Expression;
-		body: Expression
-		params: Identifier[]
+		body: BlockStatement | Expression
+		params: Pattern[]
 	}
 
 	export interface BinaryExpression extends BaseExpression {
@@ -217,6 +217,45 @@ declare module 'acorn-jsx' {
 	| TemplateElement
 	| TemplateLiteral
 	| UnaryExpression
+
+	export interface AssignmentProperty extends Node {
+		type: 'Property'
+		key: Expression
+		value: Pattern
+		kind: 'init'
+		method: false
+		shorthand: boolean
+		computed: boolean
+	}
+
+	export interface ObjectPattern extends BaseExpression {
+		type: 'ObjectPattern'
+		properties: Array<AssignmentProperty | RestElement>
+	}
+
+	export interface ArrayPattern extends BaseExpression {
+		type: 'ArrayPattern'
+		elements: Array<Pattern | null>
+	}
+
+	export interface RestElement extends BaseExpression {
+		type: 'RestElement'
+		argument: Identifier
+	}
+
+	export interface AssignmentPattern extends BaseExpression {
+		type: 'AssignmentPattern'
+		left: Pattern
+		right: Expression
+	}
+
+	export type Pattern =
+	| Identifier
+	| MemberExpression
+	| ObjectPattern
+	| ArrayPattern
+	| RestElement
+	| AssignmentPattern
 
 	interface PluginOptions {
 		allowNamespacedObjects?: boolean,
