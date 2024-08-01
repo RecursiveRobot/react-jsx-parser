@@ -442,6 +442,11 @@ export default class JsxParser extends React.Component<TProps> {
 					}
 				})
 				break
+			case 'AssignmentPattern':
+				// Lazily evaluate the default value
+				const parseDefaultValue = () => this.#parseExpression(param.right, scope)
+				functionScope[param.left.name] = args[idx] !== undefined ? args[idx] : parseDefaultValue()
+				break
 			case 'RestElement':
 				functionScope[param.argument.name] = args.slice(idx)
 				break

@@ -220,7 +220,7 @@ declare module 'acorn-jsx' {
 
 	export interface AssignmentProperty extends Node {
 		type: 'Property'
-		key: Expression
+		key: Identifier
 		value: Pattern
 		kind: 'init'
 		method: false
@@ -245,7 +245,7 @@ declare module 'acorn-jsx' {
 
 	export interface AssignmentPattern extends BaseExpression {
 		type: 'AssignmentPattern'
-		left: Pattern
+		left: Identifier
 		right: Expression
 	}
 

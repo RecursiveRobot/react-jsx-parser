@@ -1792,6 +1792,31 @@ describe('JsxParser Component', () => {
 			expect(html).toMatch('Smith, John;Doe, Jane')
 		})
 
+		it('supports default values for inline function parameters', () => {
+			const { html } = render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Custom }}
+					bindings={{ one: 1, two: 200, three: 300, four: 400 }}
+					jsx="{((one, two = 2, three = 3, four = 4) => <span>{one}, {two}, {three}, {four}</span>)(one)}"
+				/>,
+			)
+			expect(html).toMatch('<span>1, 2, 3, 4</span>')
+		})
+
+		it('supports default values for block-bodied function parameters', () => {
+			const { html } = render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Custom }}
+					bindings={{ one: 1, two: 200, three: 300, four: 400 }}
+					// eslint-disable-next-line no-template-curly-in-string
+					jsx="{((one, two = 2, three = 3, four = 4) => { return `${one}, ${two}, ${three}, ${four}`; })(one)}"
+				/>,
+			)
+			expect(html).toMatch('1, 2, 3, 4')
+		})
+
 		it('supports rest parameter destructuring for inline function parameters', () => {
 			const { html } = render(
 				<JsxParser
@@ -1817,26 +1842,26 @@ describe('JsxParser Component', () => {
 			expect(html).toMatch('1, 2, 3, 4')
 		})
 
-		it('supports mixed argument destructuring for inline function parameters', () => {
+		it('supports mixed destructuring. default values and rest parameters for inline function parameters', () => {
 			const { html } = render(
 				<JsxParser
 					renderInWrapper={false}
 					components={{ Custom }}
-					bindings={{ object: { name: 'John' }, array: [1, 42], string: 'Smith', number: 42, anotherString: 'Another String Value' }}
-					jsx="{(({ name }, [one, two], lastName, ...rest) => <span>{lastName}, {name} - [{one}, {two}] - {rest[0]} - {rest[1]}</span>)(object, array, string, number, anotherString)}"
+					bindings={{ object: { name: 'John' }, array: [1, 42], string: undefined, number: 42, anotherString: 'Another String Value' }}
+					jsx="{(({ name }, [one, two], lastName = 'Smith', ...rest) => <span>{lastName}, {name} - [{one}, {two}] - {rest[0]} - {rest[1]}</span>)(object, array, string, number, anotherString)}"
 				/>,
 			)
 			expect(html).toMatch('<span>Smith, John - [1, 42] - 42 - Another String Value</span>')
 		})
 
-		it('supports mixed argument destructuring for block-bodied function parameters', () => {
+		it('supports mixed destructuring. default values and rest parameters for block-bodied function parameters', () => {
 			const { html } = render(
 				<JsxParser
 					renderInWrapper={false}
 					components={{ Custom }}
-					bindings={{ object: { name: 'John' }, array: [1, 42], string: 'Smith', number: 42, anotherString: 'Another String Value' }}
+					bindings={{ object: { name: 'John' }, array: [1, 42], string: undefined, number: 42, anotherString: 'Another String Value' }}
 					// eslint-disable-next-line no-template-curly-in-string
-					jsx="{(({ name }, [one, two], lastName, ...rest) => { return `${lastName}, ${name} - [${one}, ${two}] - ${rest[0]} - ${rest[1]}`; })(object, array, string, number, anotherString)}"
+					jsx="{(({ name }, [one, two], lastName = 'Smith', ...rest) => { return `${lastName}, ${name} - [${one}, ${two}] - ${rest[0]} - ${rest[1]}`; })(object, array, string, number, anotherString)}"
 				/>,
 			)
 			expect(html).toMatch('Smith, John - [1, 42] - 42 - Another String Value')
