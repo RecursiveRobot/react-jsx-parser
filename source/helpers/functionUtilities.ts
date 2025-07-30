@@ -13,6 +13,8 @@ export function isSpreadElement(node: AcornJSX.BaseExpression): node is AcornJSX
 export function getClosureBindings(fullExpression: AcornJSX.Expression): string[] {
 	const result = new Set<string>()
 	const processExpression = (expression: AcornJSX.Expression): void => {
+		if (!expression) return
+
 		switch (expression.type) {
 		// foo ==> ['foo']
 		case 'Identifier':
@@ -149,6 +151,8 @@ export function getAllJsxElements(code: string): (AcornJSX.JSXElement | AcornJSX
 
 	const result: AcornJSX.JSXElement[] = []
 	const processExpression = (expression: Acorn.Node): void => {
+		if (!expression) return
+
 		switch (expression.type) {
 		// Top-level JSX Elements and Fragments are added to the collection...
 		case 'JSXElement':

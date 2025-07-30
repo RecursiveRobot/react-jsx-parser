@@ -13,6 +13,12 @@ describe('getClosureBindings', () => {
 		const bindings = getClosureBindings(expression.body[0])
 		expect(bindings).toEqual(['foo'])
 	})
+	it('should handle name-only attribute bindings', () => {
+		const text = '<Tooltip arrow disableInteractive title={foo}><span>Foo</span></Tooltip>'
+		const expression = parser.parse(text, { ecmaVersion: 'latest' })
+		const bindings = getClosureBindings(expression.body[0])
+		expect(bindings).toEqual(['foo'])
+	})
 	it('should handle simple JSX expressions', () => {
 		const text = '<span>{foo}</span>'
 		const expression = parser.parse(text, { ecmaVersion: 'latest' })
