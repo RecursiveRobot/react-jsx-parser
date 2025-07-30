@@ -3,6 +3,7 @@
 import * as Acorn from 'acorn'
 import * as AcornJSX from 'acorn-jsx'
 import React, { Fragment, ComponentType, ExoticComponent } from 'react'
+import { transpileFunctionBody, isSpreadElement } from '../helpers/functionUtilities'
 import ATTRIBUTES from '../constants/attributeNames'
 import { canHaveChildren, canHaveWhitespace } from '../constants/specialTags'
 import { randomHash } from '../helpers/hash'
@@ -31,10 +32,6 @@ export type TProps = {
 	renderUnrecognized?: (tagName: string) => JSX.Element | null,
 }
 type Scope = Record<string, any>
-
-function isSpreadElement(node: AcornJSX.BaseExpression): node is AcornJSX.SpreadElement {
-	return (node as AcornJSX.SpreadElement).type === 'SpreadElement'
-}
 
 /* eslint-disable consistent-return */
 export default class JsxParser extends React.Component<TProps> {
@@ -133,13 +130,22 @@ export default class JsxParser extends React.Component<TProps> {
 				// requires wrapping the function in an IIFE to handle this mapping logic
 				const paramsRequirePreprocessing = expression.params.some(param => param.type !== 'Identifier')
 				const body = paramsRequirePreprocessing ?
-					`return (${this.#getRawTextForExpression(expression)})(${paramNames.join(', ')})` :
+					`{ return (${this.#getRawTextForExpression(expression)})(${paramNames.join(', ')}); }` :
 					this.#getRawTextForExpression(expression.body)
 				try {
+					// JSX elements cannot be rendered by the vanilla JS runtime, so we need to
+					// transpile them into render function calls.  Those render functions are
+					// included in the invocation scope, so they can be called from within the
+					// function body without requiring additional input arguments.
+					const [transpiledBody, jsxRenderFunctions] = transpileFunctionBody(
+						body,
+						{ ...this.props.bindings, ...scope },
+						this.#parseExpression.bind(this),
+					)
 					return createFunctionProxy(
 						// eslint-disable-next-line no-new-func
-						new Function(...paramNames, body),
-						{ ...this.props.bindings, ...scope },
+						new Function(...paramNames, transpiledBody),
+						{ ...this.props.bindings, ...scope, ...jsxRenderFunctions },
 					)
 				} catch (error: any) {
 					this.props.onError?.(new Error(`Unable to parse function '${this.#getRawTextForExpression(expression)}': ${error}.`))

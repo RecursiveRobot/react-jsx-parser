@@ -1866,5 +1866,254 @@ describe('JsxParser Component', () => {
 			)
 			expect(html).toMatch('Smith, John - [1, 42] - 42 - Another String Value')
 		})
+
+		it('supports JSX elements inside block-bodied functions - direct return', () => {
+			const jsx = `{
+				(() => {
+					return <><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span></>;	
+				})()
+			}`
+			const { html } = render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Custom }}
+					bindings={{ }}
+					jsx={jsx}
+				/>,
+			)
+			expect(html).toMatch('<span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>')
+		})
+
+		it('supports JSX elements inside block-bodied functions - arrow expressions', () => {
+			const jsx = `{
+				((additionalItems) => {
+					const items = [
+						...additionalItems,
+						3,
+						4,
+						5,
+					];
+					return items.map(item => <span>{item}</span>);
+				})(additionalItems)
+			}`
+			const { html } = render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Custom }}
+					bindings={{ additionalItems: [1, 2] }}
+					jsx={jsx}
+				/>,
+			)
+			expect(html).toMatch('<span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>')
+		})
+
+		it('supports JSX elements inside block-bodied functions - array members', () => {
+			const jsx = `{
+				(() => {
+					const items = [
+						<span>1</span>,
+						<span>2</span>,
+						<span>3</span>,
+						<span>4</span>,
+						<span>5</span>,
+					];
+					return items;
+				})()
+			}`
+			const { html } = render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Custom }}
+					bindings={{ }}
+					jsx={jsx}
+				/>,
+			)
+			expect(html).toMatch('<span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>')
+		})
+
+		it('supports JSX elements inside block-bodied functions - object members', () => {
+			const jsx = `{
+				(() => {
+					const items = {
+						a: <span>1</span>,
+						b: <span>2</span>,
+						c: <span>3</span>,
+						d: <span>4</span>,
+						e: <span>5</span>,
+					};
+					return Object.values(items);
+				})()
+			}`
+			const { html } = render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Custom }}
+					bindings={{ }}
+					jsx={jsx}
+				/>,
+			)
+			expect(html).toMatch('<span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>')
+		})
+
+		it('supports JSX elements inside block-bodied functions - ternary expressions', () => {
+			const jsx = `{
+				((foo) => {
+					return foo >= 0 ?
+						<span>positive</span> :
+						<span>negative</span>;
+				})(foo)
+			}`
+			const { html } = render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Custom }}
+					bindings={{ foo: 5 }}
+					jsx={jsx}
+				/>,
+			)
+			expect(html).toMatch('<span>positive</span>')
+		})
+
+		it('supports JSX elements inside block-bodied functions - nested bindings within JSX', () => {
+			const jsx = `{
+				((foo, bar) => {
+					const items = [
+						{ name: 'One', value: 1 },
+						{ name: 'Two', value: 2 },
+						{ name: 'Three', value: 3 },
+						{ name: 'Four', value: 4 },
+						{ name: 'Five', value: 5 }
+					];
+					return items.map(item => <div><span>{item.name}: {item.value}</span><span>foo: {foo}</span><span>bar: {bar}</span></div>);
+				})(foo, bar)
+			}`
+			const { html } = render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Custom }}
+					bindings={{ foo: 5, bar: 10 }}
+					jsx={jsx}
+				/>,
+			)
+			expect(html).toMatch('<div><span>One: 1</span><span>foo: 5</span><span>bar: 10</span></div><div><span>Two: 2</span><span>foo: 5</span><span>bar: 10</span></div><div><span>Three: 3</span><span>foo: 5</span><span>bar: 10</span></div><div><span>Four: 4</span><span>foo: 5</span><span>bar: 10</span></div><div><span>Five: 5</span><span>foo: 5</span><span>bar: 10</span></div>')
+		})
+
+		it('supports JSX elements inside block-bodied functions - multiple bindings within JSX', () => {
+			const jsx = `{
+				((foo, bar) => {
+					const items = [
+						{ name: 'One', value: 1 },
+						{ name: 'Two', value: 2 },
+						{ name: 'Three', value: 3 },
+						{ name: 'Four', value: 4 },
+						{ name: 'Five', value: 5 },
+					];
+					return items.map(({ name, value }) => <div><span>{name}: {value}</span><span>foo: {foo}</span><span>bar: {bar}</span></div>);
+				})(foo, bar)
+			}`
+			const { html } = render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Custom }}
+					bindings={{ foo: 5, bar: 10 }}
+					jsx={jsx}
+				/>,
+			)
+			expect(html).toMatch('<div><span>One: 1</span><span>foo: 5</span><span>bar: 10</span></div><div><span>Two: 2</span><span>foo: 5</span><span>bar: 10</span></div><div><span>Three: 3</span><span>foo: 5</span><span>bar: 10</span></div><div><span>Four: 4</span><span>foo: 5</span><span>bar: 10</span></div><div><span>Five: 5</span><span>foo: 5</span><span>bar: 10</span></div>')
+		})
+
+		it('supports JSX elements inside block-bodied functions - template literals', () => {
+			const jsx = `{
+				(() => {
+					const items = [
+						{ name: 'One', value: 1 },
+						{ name: 'Two', value: 2 },
+						{ name: 'Three', value: 3 },
+						{ name: 'Four', value: 4 },
+						{ name: 'Five', value: 5 },
+					];
+					return items.map(({ name, value }) => <span>{\`\${name}: \${value}\`}</span>);
+				})()
+			}`
+			const { html } = render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Custom }}
+					bindings={{ }}
+					// eslint-disable-next-line no-template-curly-in-string
+					jsx={jsx}
+				/>,
+			)
+			expect(html).toMatch('<span>One: 1</span><span>Two: 2</span><span>Three: 3</span><span>Four: 4</span><span>Five: 5</span>')
+		})
+
+		it('supports JSX elements inside block-bodied functions - nested block-bodied functions', () => {
+			const jsx = `{
+				((foo, bar, baz) => {
+					const items = [
+						{ name: 'One', value: 1 },
+						{ name: 'Two', value: 2 },
+						{ name: 'Three', value: 3 },
+						{ name: 'Four', value: 4 },
+						{ name: 'Five', value: 5 },
+					];
+					return items.map(({ name, value }) => {
+						const valuePlusFoo = value + foo;
+						const text = \`\${name}: \${valuePlusFoo}\`;
+						return <div><span>{text}</span><span>foo: {foo}</span><span>bar: {bar}</span><span>baz: {baz}</span></div>;
+					});
+				})(foo, bar, baz)
+			}`
+			const { html } = render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Custom }}
+					bindings={{ foo: 5, bar: 10, baz: 15 }}
+					// eslint-disable-next-line no-template-curly-in-string
+					jsx={jsx}
+				/>,
+			)
+			expect(html).toMatch('<div><span>One: 6</span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span></div><div><span>Two: 7</span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span></div><div><span>Three: 8</span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span></div><div><span>Four: 9</span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span></div><div><span>Five: 10</span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span></div>')
+		})
+
+		it('supports JSX elements inside block-bodied functions - kitchen sink', () => {
+			// eslint-disable-next-line no-template-curly-in-string
+			const jsx = `{
+				((foo, bar) => {
+					const { baz } = this;
+
+					function* getItems() {
+						yield { name: 'One', value: 1, icon: <span>#1</span> };
+						yield { name: 'Two', value: 2, icon: <span>#2</span> };
+						yield { name: 'Three', value: 3, icon: <span>#3</span> };
+						yield { name: 'Four', value: 4, icon: <span>#4</span> };
+						yield { name: 'Five', value: 5, icon: <span>#5</span> };
+					}
+
+					const renderItem = ({ name, value, icon }) => <span>{\`\${name}: \${value + this?.foo}\`}{icon}</span>;
+					const renderFoo = () => <span>foo: {foo}</span>;
+					const renderBar = (x) => { return <span>bar: {x ?? foo}</span> };
+					const renderedBaz = this.foo > 0 ? <span>baz: {baz}</span> : <span>No.</span>;
+					const myDate = "2024-10-31";
+					const renderDate = () => <span>Date: {new Date(myDate).getFullYear()}-{new Date(myDate).getMonth() + 1}-{new Date(myDate).getDate()}</span>;
+					const elementClassName = "foo";
+
+					return [...getItems()].map(({ name: mappedName, value, ...rest }) => {
+						return <div className={elementClassName}>{renderItem({ name: mappedName, value, ...rest })}{renderFoo()}{renderBar(bar)}{renderedBaz}{this.renderQux()}{renderDate()}</div>;
+					});
+				})(foo, bar)
+			}`
+
+			const { html } = render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Custom }}
+					bindings={{ foo: 5, bar: 10, baz: 15, renderQux: () => <JsxParser renderInWrapper={false} jsx="<span>qux: {qux}</span>" bindings={{ qux: 20 }} /> }}
+					// eslint-disable-next-line no-template-curly-in-string
+					jsx={jsx}
+				/>,
+			)
+			expect(html).toMatch('<div class="foo"><span>One: 6<span>#1</span></span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span><span>qux: 20</span><span>Date: 2024-10-31</span></div><div class="foo"><span>Two: 7<span>#2</span></span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span><span>qux: 20</span><span>Date: 2024-10-31</span></div><div class="foo"><span>Three: 8<span>#3</span></span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span><span>qux: 20</span><span>Date: 2024-10-31</span></div><div class="foo"><span>Four: 9<span>#4</span></span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span><span>qux: 20</span><span>Date: 2024-10-31</span></div><div class="foo"><span>Five: 10<span>#5</span></span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span><span>qux: 20</span><span>Date: 2024-10-31</span></div>')
+		})
 	})
 })

@@ -52,7 +52,8 @@ Finally, a note about property bindings. The `JsxParser` can handle several type
  - string-value binding, such as `stringProp="foo"`
  - expression-binding, such as `calc={1 + 1}`
  - named-value binding, such as `eventHandler={myEventHandler}` (note that this requires a match in `bindings`)
- - simple [single statement arrow expressions](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Arrow_functions#basic_syntax) `(item) => <p>{item.name}</p>`
+ - [single statement arrow expressions](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Arrow_functions#basic_syntax), such as `(item) => <p>{item.name}</p>`
+ - [multi-statement arrow functions](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Arrow_functions#function_body), such as `(item) => { const { name } = item; return <p>{name}</p>; }`
 
 This component also supports inline arrow function declarations (both expression-bodied and block-bodied), such as:
  - `onClick={() => showToastNotification("Button clicked!") }`
