@@ -57,14 +57,16 @@ export default class JsxParser extends React.Component<TProps> {
 
 	private ParsedChildren: ParsedTree = null
 
-	#getRawTextForExpression: (expression: AcornJSX.Expression) => string = () => ''
+	jsx: string = ''
+	#getRawTextForExpression: (expression: AcornJSX.Expression) => string =
+		(e: AcornJSX.Expression) => this.jsx.slice(e.start, e.end)
 
 	#parseJSX = (jsx: string): JSX.Element | JSX.Element[] | null => {
 		const parser = Acorn.Parser.extend(AcornJSX.default({
 			autoCloseVoidElements: this.props.autoCloseVoidElements,
 		}))
 		const wrappedJsx = `<root>${jsx}</root>`
-		this.#getRawTextForExpression = (e: AcornJSX.Expression) => wrappedJsx.slice(e.start, e.end)
+		this.jsx = wrappedJsx
 		let parsed: AcornJSX.Expression[] = []
 		try {
 			// @ts-ignore - AcornJsx doesn't have typescript typings
@@ -140,7 +142,11 @@ export default class JsxParser extends React.Component<TProps> {
 					const [transpiledBody, jsxRenderFunctions] = transpileFunctionBody(
 						body,
 						{ ...this.props.bindings, ...scope },
-						this.#parseExpression.bind(this),
+						(elementJsx, elementExpression, elementScope) => {
+							const elementParser = new JsxParser(this.props)
+							elementParser.jsx = elementJsx
+							return elementParser.#parseExpression(elementExpression, elementScope)
+						},
 					)
 					return createFunctionProxy(
 						// eslint-disable-next-line no-new-func

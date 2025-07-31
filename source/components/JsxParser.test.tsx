@@ -2057,11 +2057,11 @@ describe('JsxParser Component', () => {
 						{ name: 'Four', value: 4 },
 						{ name: 'Five', value: 5 },
 					];
-					return items.map(({ name, value }) => {
-						const valuePlusFoo = value + foo;
-						const text = \`\${name}: \${valuePlusFoo}\`;
-						return <div><span>{text}</span><span>foo: {foo}</span><span>bar: {bar}</span><span>baz: {baz}</span></div>;
-					});
+					return <div>{
+						items.map(({ name, ...rest }) => {
+							return <span>{name}: {rest.value}</span>;
+						})
+					}</div>;
 				})(foo, bar, baz)
 			}`
 			const { html } = render(
@@ -2073,7 +2073,33 @@ describe('JsxParser Component', () => {
 					jsx={jsx}
 				/>,
 			)
-			expect(html).toMatch('<div><span>One: 6</span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span></div><div><span>Two: 7</span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span></div><div><span>Three: 8</span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span></div><div><span>Four: 9</span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span></div><div><span>Five: 10</span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span></div>')
+			expect(html).toMatch('<div><span>One: 1</span><span>Two: 2</span><span>Three: 3</span><span>Four: 4</span><span>Five: 5</span></div>')
+		})
+
+		it('supports JSX elements inside block-bodied functions - custom components', () => {
+			const jsx = `{
+				((foo, bar) => {
+					const items = [
+						{ name: 'One', value: 1 },
+						{ name: 'Two', value: 2 },
+						{ name: 'Three', value: 3 },
+						{ name: 'Four', value: 4 },
+						{ name: 'Five', value: 5 },
+					];
+					return items.map(({ name, value }) => <Custom className={name} text={\`\${name}: \`}>{value + foo}</Custom>);
+				})(foo, bar)
+			}`
+
+			const { html } = render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Custom }}
+					bindings={{ foo: 5, bar: 10 }}
+					// eslint-disable-next-line no-template-curly-in-string
+					jsx={jsx}
+				/>,
+			)
+			expect(html).toMatch('<div class="One">One: 6</div><div class="Two">Two: 7</div><div class="Three">Three: 8</div><div class="Four">Four: 9</div><div class="Five">Five: 10</div>')
 		})
 
 		it('supports JSX elements inside block-bodied functions - kitchen sink', () => {
