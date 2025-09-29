@@ -230,34 +230,36 @@ describe('getAllJsxElements', () => {
 			expect(result).toEqual(45)
 		})
 		it('produces a user-friendly error message - full surrounding scope available', () => {
-			const body = 'const line_one = 1;\nconst line_two = 2;\nconst line_three = 3;\nthrow new Error("This line should be highlighted.");\nconst line_four = 4;\nconst line_five = 5;\nconst line_six = 6;'
+			const body = 'const line_one = 1;\nconst line_two = 2;\nthrow new Error("This line should be highlighted.");\nconst line_four = 4;\nconst line_five = 5;\nconst line_six = 6;'
 			const func = constructFunction(['bar', 'baz'], body)
 			try {
 				func(1, 2)
 			} catch (error) {
 				/* eslint-disable no-regex-spaces */
-				expect(error.message).toMatch(/Error occurred in dynamic function 'anonymous' at line 7:/)
-				expect(error.message).toMatch(/    5: const line_two = 2;/)
-				expect(error.message).toMatch(/    6: const line_three = 3;/)
-				expect(error.message).toMatch(/>>> 7: throw new Error\("This line should be highlighted."\);/)
-				expect(error.message).toMatch(/    8: const line_four = 4;/)
-				expect(error.message).toMatch(/    9: const line_five = 5;/)
+				expect(error.message).toMatch(/Error occurred in dynamic function 'anonymous' at line 3:/)
+				expect(error.message).toMatch(/    1: const line_one = 1;/)
+				expect(error.message).toMatch(/    2: const line_two = 2;/)
+				expect(error.message).toMatch(/>>> 3: throw new Error\("This line should be highlighted."\);/)
+				expect(error.message).toMatch(/    4: const line_four = 4;/)
+				expect(error.message).toMatch(/    5: const line_five = 5;/)
+				expect(error.stack).not.toMatch(/\{/)
+				expect(error.stack).not.toMatch(/\}/)
 				/* eslint-enable no-regex-spaces */
 			}
 		})
 		it('produces a user-friendly error message - some surrounding scope available', () => {
-			const body = 'const line_three = 3;\nthrow new Error("This line should be highlighted.");\nconst line_four = 4;'
+			const body = 'const line_one = 1;\nthrow new Error("This line should be highlighted.");\nconst line_three = 3;'
 			const func = constructFunction(['bar', 'baz'], body)
 			try {
 				func(1, 2)
 			} catch (error) {
 				/* eslint-disable no-regex-spaces */
-				expect(error.message).toMatch(/Error occurred in dynamic function 'anonymous' at line 5:/)
-				expect(error.message).not.toMatch(/    3: const line_two = 2;/)
-				expect(error.message).toMatch(/    4: const line_three = 3;/)
-				expect(error.message).toMatch(/>>> 5: throw new Error\("This line should be highlighted."\);/)
-				expect(error.message).toMatch(/    6: const line_four = 4;/)
-				expect(error.message).not.toMatch(/    7: const line_five = 5;/)
+				expect(error.message).toMatch(/Error occurred in dynamic function 'anonymous' at line 2:/)
+				expect(error.message).toMatch(/    1: const line_one = 1;/)
+				expect(error.message).toMatch(/>>> 2: throw new Error\("This line should be highlighted."\);/)
+				expect(error.message).toMatch(/    3: const line_three = 3;/)
+				expect(error.stack).not.toMatch(/\{/)
+				expect(error.stack).not.toMatch(/\}/)
 				/* eslint-enable no-regex-spaces */
 			}
 		})
@@ -268,12 +270,10 @@ describe('getAllJsxElements', () => {
 				func(1, 2)
 			} catch (error) {
 				/* eslint-disable no-regex-spaces */
-				expect(error.message).toMatch(/Error occurred in dynamic function 'anonymous' at line 4:/)
-				expect(error.message).not.toMatch(/    2: const line_two = 2;/)
-				expect(error.message).not.toMatch(/    3: const line_three = 3;/)
-				expect(error.message).toMatch(/>>> 4: throw new Error\("This line should be highlighted."\);/)
-				expect(error.message).not.toMatch(/    5: const line_four = 4;/)
-				expect(error.message).not.toMatch(/    6: const line_five = 5;/)
+				expect(error.message).toMatch(/Error occurred in dynamic function 'anonymous' at line 1:/)
+				expect(error.message).toMatch(/>>> 1: throw new Error\("This line should be highlighted."\);/)
+				expect(error.stack).not.toMatch(/\{/)
+				expect(error.stack).not.toMatch(/\}/)
 				/* eslint-enable no-regex-spaces */
 			}
 		})
@@ -284,8 +284,26 @@ describe('getAllJsxElements', () => {
 				func(1, 2)
 			} catch (error) {
 				/* eslint-disable no-regex-spaces */
-				expect(error.message).toMatch(/Error occurred in dynamic function 'foo' at line 4:/)
-				expect(error.message).toMatch(/>>> 4: throw new Error\("This line should be highlighted."\);/)
+				expect(error.message).toMatch(/Error occurred in dynamic function 'foo' at line 1:/)
+				expect(error.message).toMatch(/>>> 1: throw new Error\("This line should be highlighted."\);/)
+				/* eslint-enable no-regex-spaces */
+			}
+		})
+		it('excludes leading and trailing whitespace from the source code fragment', () => {
+			const body = '\n\n\n\n\n\n const line_one = 1;\nconst line_two = 2;\nthrow new Error("This line should be highlighted.");\nconst line_four = 4;\nconst line_five = 5;\n\n\n   \n'
+			const func = constructFunction(['bar', 'baz'], body)
+			try {
+				func(1, 2)
+			} catch (error) {
+				/* eslint-disable no-regex-spaces */
+				expect(error.message).toMatch(/Error occurred in dynamic function 'anonymous' at line 3:/)
+				expect(error.message).toMatch(/    1: const line_one = 1;/)
+				expect(error.message).toMatch(/    2: const line_two = 2;/)
+				expect(error.message).toMatch(/>>> 3: throw new Error\("This line should be highlighted."\);/)
+				expect(error.message).toMatch(/    4: const line_four = 4;/)
+				expect(error.message).toMatch(/    5: const line_five = 5;/)
+				expect(error.stack).not.toMatch(/\{/)
+				expect(error.stack).not.toMatch(/\}/)
 				/* eslint-enable no-regex-spaces */
 			}
 		})

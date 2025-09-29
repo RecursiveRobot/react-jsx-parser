@@ -259,7 +259,7 @@ export function constructFunction(
 	const sourceUrl = `dynamic-${name}-${fnId}.js`
 
 	// Prepend a source map URL to the body...
-	const enhancedBody = `//# sourceURL=${sourceUrl}\n${body}`
+	const enhancedBody = `//# sourceURL=${sourceUrl}\n${body.trim()}`
 
 	// eslint-disable-next-line no-new-func
 	const fn = new Function(...paramNames, enhancedBody)
@@ -272,19 +272,18 @@ export function constructFunction(
 			// Parse the stack trace to find the line to highlight...
 			const stackLines = error.stack.split('\n')
 			const errorLine = stackLines.find((line: string) => line.includes(sourceUrl))
-			const errorLineNumber = parseInt(errorLine?.match(/:(\d+):/)?.[1], 10)
+			const errorLineNumber = parseInt(errorLine?.match(/:(\d+):/)?.[1], 10) - 3
 
 			// Enhance the original error with the relevant source code...
-			const fullBody = `function anonymous(${paramNames.join(',')}\n) {\n${body}\n\n}`
-			const codeLines = fullBody.split('\n')
+			const codeLines = body.trim().split('\n')
 			// Include up to 2 lines before the error, excluding the first 3 (the function declaration)
-			const contextStart = Math.max(2, errorLineNumber - 4)
+			const contextStart = Math.max(0, errorLineNumber - 3)
 			// Include up to 2 lines after the error, excluding the last 3 (whitespace and braces)
-			const contextEnd = Math.min(codeLines.length - 2, errorLineNumber + 1)
+			const contextEnd = Math.min(codeLines.length, errorLineNumber + 2)
 			const codeContext = codeLines
 				.slice(contextStart, contextEnd)
 				.map((line, index) => {
-					const lineNum = contextStart + index + 2
+					const lineNum = contextStart + index + 1
 					const marker = lineNum === errorLineNumber ? '>>> ' : '    '
 					return `${marker}${lineNum}: ${line}`
 				})
