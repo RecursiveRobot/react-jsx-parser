@@ -56,6 +56,7 @@ export default class JsxParser extends React.Component<TProps> {
 	}
 
 	private ParsedChildren: ParsedTree = null
+	private lastAttributeName: string | undefined = undefined
 
 	jsx: string = ''
 	#getRawTextForExpression: (expression: AcornJSX.Expression) => string =
@@ -89,9 +90,11 @@ export default class JsxParser extends React.Component<TProps> {
 		switch (expression.type) {
 		case 'JSXAttribute':
 			if (expression.value === null) return true
+			this.lastAttributeName = expression.name.name
 			return this.#parseExpression(expression.value, scope)
 		case 'JSXElement':
 		case 'JSXFragment':
+			this.lastAttributeName = undefined
 			return this.#parseElement(expression, scope)
 		case 'JSXExpressionContainer':
 			return this.#parseExpression(expression.expression, scope)
@@ -150,7 +153,7 @@ export default class JsxParser extends React.Component<TProps> {
 					)
 					return createFunctionProxy(
 						// eslint-disable-next-line no-new-func
-						constructFunction(paramNames, transpiledBody),
+						constructFunction(paramNames, transpiledBody, this.lastAttributeName),
 						{ ...this.props.bindings, ...scope, ...jsxRenderFunctions },
 					)
 				} catch (error: any) {
