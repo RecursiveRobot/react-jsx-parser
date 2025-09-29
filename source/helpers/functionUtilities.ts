@@ -249,6 +249,17 @@ export function transpileFunctionBody(
 	return [newBody, renderFunctions]
 }
 
+function trimExcessLeadingWhitespaceFromCodeLines(lines: string[]) {
+	const minLeadingWhitespace: number | undefined = lines
+		.filter(l => !l.startsWith('{'))
+		.reduce((min, line) => {
+			const leadingWhitespace = line.match(/^(\s*)\S+/)?.[1]
+			return leadingWhitespace ? Math.min(leadingWhitespace.length, min ?? Infinity) : min
+		}, undefined as number | undefined)
+	// eslint-disable-next-line no-confusing-arrow
+	return lines.map(line => line.replace(new RegExp(`^\\s{${minLeadingWhitespace ?? 0}}`), ''))
+}
+
 export function constructFunction(
 	paramNames: string[],
 	body: string,
@@ -258,8 +269,12 @@ export function constructFunction(
 	const fnId = Math.random().toString(36).substring(2, 9)
 	const sourceUrl = `dynamic-${name}-${fnId}.js`
 
+	// Remove excess surrounding brackets and leading/trailing blank lines...
+	let trimmedBody = body.match(/^\{{1}([\S\s]*)\}{1}$/)?.[1] ?? body
+	trimmedBody = trimmedBody.replace(/^\n+|\n+$/g, '')
+
 	// Prepend a source map URL to the body...
-	const enhancedBody = `//# sourceURL=${sourceUrl}\n${body.trim()}`
+	const enhancedBody = `//# sourceURL=${sourceUrl}\n${trimmedBody}`
 
 	// eslint-disable-next-line no-new-func
 	const fn = new Function(...paramNames, enhancedBody)
@@ -275,7 +290,7 @@ export function constructFunction(
 			const errorLineNumber = parseInt(errorLine?.match(/:(\d+):/)?.[1], 10) - 3
 
 			// Enhance the original error with the relevant source code...
-			const codeLines = body.trim().split('\n')
+			const codeLines = trimExcessLeadingWhitespaceFromCodeLines(trimmedBody.split('\n'))
 			// Include up to 2 lines before the error, excluding the first 3 (the function declaration)
 			const contextStart = Math.max(0, errorLineNumber - 3)
 			// Include up to 2 lines after the error, excluding the last 3 (whitespace and braces)
