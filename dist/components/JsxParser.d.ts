@@ -26,6 +26,7 @@ export default class JsxParser extends React.Component<TProps> {
     static displayName: string;
     static defaultProps: TProps;
     private ParsedChildren;
+    private lastAttributeName;
     jsx: string;
     render: () => JSX.Element;
 }
