@@ -307,7 +307,7 @@ export function constructFunction(
 			// Mutate the original error's stack trace and message to include the source code context...
 			const errorContext = `Error occurred in dynamic function '${name}' at line ${errorLineNumber}:\n${codeContext}`
 			const enhancedErrorMessage = `${error.message}\n\n${errorContext}`
-			error.stack = error.stack.replace(error.message, enhancedErrorMessage)
+			error.stack = error.stack.replace(error.message, `${enhancedErrorMessage}\n\n`)
 			error.message = enhancedErrorMessage
 
 			// Re-throw the modified error...
