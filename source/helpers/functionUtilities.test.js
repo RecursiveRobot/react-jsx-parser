@@ -1,6 +1,6 @@
 import * as Acorn from 'acorn'
 import * as AcornJSX from 'acorn-jsx'
-import { getAllJsxElements, getClosureBindings } from './functionUtilities'
+import { getAllJsxElements, getClosureBindings, constructFunction } from './functionUtilities'
 
 describe('getClosureBindings', () => {
 	const parser = Acorn.Parser.extend(AcornJSX.default({
@@ -202,5 +202,92 @@ describe('getAllJsxElements', () => {
 		expect(elements).toHaveLength(1)
 		expect(elements[0].type).toEqual('JSXElement')
 		expect(elements[0].openingElement.name.name).toEqual('div')
+	})
+
+	describe('constructFunction', () => {
+		it('should handle parameterless functions', () => {
+			const body = 'const foo = 42;\nreturn foo;'
+			const func = constructFunction([], body)
+			const result = func()
+			expect(result).toEqual(42)
+		})
+		it('should handle parameterized functions', () => {
+			const body = 'const foo = 42;\nreturn foo + bar + baz;'
+			const func = constructFunction(['bar', 'baz'], body)
+			const result = func(1, 2)
+			expect(result).toEqual(45)
+		})
+		it('should have access to provided scope', () => {
+			const body = 'const foo = 42;\nreturn foo + this.bar + this.baz;'
+			const func = constructFunction([], body)
+			const result = func.apply({ bar: 1, baz: 2 })
+			expect(result).toEqual(45)
+		})
+		it('should have access to provided scope - nested', () => {
+			const body = 'const foo = 42;\nreturn foo + this.foobar.bar + this.foobar.baz;'
+			const func = constructFunction([], body)
+			const result = func.call({ foobar: { bar: 1, baz: 2 } })
+			expect(result).toEqual(45)
+		})
+		it('produces a user-friendly error message - full surrounding scope available', () => {
+			const body = 'const line_one = 1;\nconst line_two = 2;\nconst line_three = 3;\nthrow new Error("This line should be highlighted.");\nconst line_four = 4;\nconst line_five = 5;\nconst line_six = 6;'
+			const func = constructFunction(['bar', 'baz'], body)
+			try {
+				func(1, 2)
+			} catch (error) {
+				/* eslint-disable no-regex-spaces */
+				expect(error.message).toMatch(/Error occurred in dynamic function 'anonymous' at line 7:/)
+				expect(error.message).toMatch(/    5: const line_two = 2;/)
+				expect(error.message).toMatch(/    6: const line_three = 3;/)
+				expect(error.message).toMatch(/>>> 7: throw new Error\("This line should be highlighted."\);/)
+				expect(error.message).toMatch(/    8: const line_four = 4;/)
+				expect(error.message).toMatch(/    9: const line_five = 5;/)
+				/* eslint-enable no-regex-spaces */
+			}
+		})
+		it('produces a user-friendly error message - some surrounding scope available', () => {
+			const body = 'const line_three = 3;\nthrow new Error("This line should be highlighted.");\nconst line_four = 4;'
+			const func = constructFunction(['bar', 'baz'], body)
+			try {
+				func(1, 2)
+			} catch (error) {
+				/* eslint-disable no-regex-spaces */
+				expect(error.message).toMatch(/Error occurred in dynamic function 'anonymous' at line 5:/)
+				expect(error.message).not.toMatch(/    3: const line_two = 2;/)
+				expect(error.message).toMatch(/    4: const line_three = 3;/)
+				expect(error.message).toMatch(/>>> 5: throw new Error\("This line should be highlighted."\);/)
+				expect(error.message).toMatch(/    6: const line_four = 4;/)
+				expect(error.message).not.toMatch(/    7: const line_five = 5;/)
+				/* eslint-enable no-regex-spaces */
+			}
+		})
+		it('produces a user-friendly error message - no surrounding scope available', () => {
+			const body = 'throw new Error("This line should be highlighted.");'
+			const func = constructFunction(['bar', 'baz'], body)
+			try {
+				func(1, 2)
+			} catch (error) {
+				/* eslint-disable no-regex-spaces */
+				expect(error.message).toMatch(/Error occurred in dynamic function 'anonymous' at line 4:/)
+				expect(error.message).not.toMatch(/    2: const line_two = 2;/)
+				expect(error.message).not.toMatch(/    3: const line_three = 3;/)
+				expect(error.message).toMatch(/>>> 4: throw new Error\("This line should be highlighted."\);/)
+				expect(error.message).not.toMatch(/    5: const line_four = 4;/)
+				expect(error.message).not.toMatch(/    6: const line_five = 5;/)
+				/* eslint-enable no-regex-spaces */
+			}
+		})
+		it('includes the provided function name in the error message', () => {
+			const body = 'throw new Error("This line should be highlighted.");'
+			const func = constructFunction(['bar', 'baz'], body, 'foo')
+			try {
+				func(1, 2)
+			} catch (error) {
+				/* eslint-disable no-regex-spaces */
+				expect(error.message).toMatch(/Error occurred in dynamic function 'foo' at line 4:/)
+				expect(error.message).toMatch(/>>> 4: throw new Error\("This line should be highlighted."\);/)
+				/* eslint-enable no-regex-spaces */
+			}
+		})
 	})
 })

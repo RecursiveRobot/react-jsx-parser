@@ -3,7 +3,7 @@
 import * as Acorn from 'acorn'
 import * as AcornJSX from 'acorn-jsx'
 import React, { Fragment, ComponentType, ExoticComponent } from 'react'
-import { transpileFunctionBody, isSpreadElement } from '../helpers/functionUtilities'
+import { transpileFunctionBody, isSpreadElement, constructFunction } from '../helpers/functionUtilities'
 import ATTRIBUTES from '../constants/attributeNames'
 import { canHaveChildren, canHaveWhitespace } from '../constants/specialTags'
 import { randomHash } from '../helpers/hash'
@@ -150,7 +150,7 @@ export default class JsxParser extends React.Component<TProps> {
 					)
 					return createFunctionProxy(
 						// eslint-disable-next-line no-new-func
-						new Function(...paramNames, transpiledBody),
+						constructFunction(paramNames, transpiledBody),
 						{ ...this.props.bindings, ...scope, ...jsxRenderFunctions },
 					)
 				} catch (error: any) {

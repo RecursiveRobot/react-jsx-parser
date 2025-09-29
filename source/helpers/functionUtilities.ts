@@ -248,3 +248,56 @@ export function transpileFunctionBody(
 	})
 	return [newBody, renderFunctions]
 }
+
+export function constructFunction(
+	paramNames: string[],
+	body: string,
+	name: string = 'anonymous',
+) {
+	// Create a unique identifier for this function...
+	const fnId = Math.random().toString(36).substring(2, 9)
+	const sourceUrl = `dynamic-${name}-${fnId}.js`
+
+	// Prepend a source map URL to the body...
+	const enhancedBody = `//# sourceURL=${sourceUrl}\n${body}`
+
+	// eslint-disable-next-line no-new-func
+	const fn = new Function(...paramNames, enhancedBody)
+	return function anonymous(...args: any[]) {
+		// Wrap the function call in a try/catch block to allow us to augment the error message...
+		try {
+			// @ts-ignore: 'this' scope binding uses implicit any
+			return fn.apply(this, args)
+		} catch (error: any) {
+			// Parse the stack trace to find the line to highlight...
+			const stackLines = error.stack.split('\n')
+			const errorLine = stackLines.find((line: string) => line.includes(sourceUrl))
+			const errorLineNumber = parseInt(errorLine?.match(/:(\d+):/)?.[1], 10)
+
+			// Enhance the original error with the relevant source code...
+			const fullBody = `function anonymous(${paramNames.join(',')}\n) {\n${body}\n\n}`
+			const codeLines = fullBody.split('\n')
+			// Include up to 2 lines before the error, excluding the first 3 (the function declaration)
+			const contextStart = Math.max(2, errorLineNumber - 4)
+			// Include up to 2 lines after the error, excluding the last 3 (whitespace and braces)
+			const contextEnd = Math.min(codeLines.length - 2, errorLineNumber + 1)
+			const codeContext = codeLines
+				.slice(contextStart, contextEnd)
+				.map((line, index) => {
+					const lineNum = contextStart + index + 2
+					const marker = lineNum === errorLineNumber ? '>>> ' : '    '
+					return `${marker}${lineNum}: ${line}`
+				})
+				.join('\n')
+
+			// Mutate the original error's stack trace and message to include the source code context...
+			const errorContext = `Error occurred in dynamic function '${name}' at line ${errorLineNumber}:\n${codeContext}`
+			const enhancedErrorMessage = `${error.message}\n\n${errorContext}`
+			error.stack = error.stack.replace(error.message, enhancedErrorMessage)
+			error.message = enhancedErrorMessage
+
+			// Re-throw the modified error...
+			throw error
+		}
+	}
+}
