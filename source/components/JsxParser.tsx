@@ -311,7 +311,7 @@ export default class JsxParser extends React.Component<TProps> {
 			let parent = target
 			const member = path.reduce((value, next) => {
 				parent = value
-				return expression.optional ? value?.[next] : value[next]
+				return value?.[next]
 			}, target)
 			if (typeof member === 'function') return member.bind(parent)
 

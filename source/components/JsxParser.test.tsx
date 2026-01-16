@@ -1111,6 +1111,7 @@ describe('JsxParser Component', () => {
 				with: 'somethingElse',
 				object2: { with: 'with' },
 				fieldName: 'and',
+				does: null,
 			}
 
 			test('can evaluate a[b]', () => {
@@ -1232,6 +1233,17 @@ describe('JsxParser Component', () => {
 
 				expect(rendered.childNodes[0].textContent).toEqual(bindings.object['and'])
 				expect(component.ParsedChildren[0].props.foo).toEqual(bindings.object['and'])
+			})
+			test('does not raise error when navigating null or undefined members', () => {
+				const expression = 'does.not.exist'
+				const jsx = `<span foo={${expression}}>{${expression}}</span>`
+				const onError = jest.fn()
+				const { rendered, component } = render(<JsxParser {...{ bindings, jsx, onError }} />)
+
+				expect(rendered.childNodes[0].textContent).toEqual('')
+				expect(component.ParsedChildren[0].props.foo).toEqual(undefined)
+
+				expect(onError).not.toBeCalled()
 			})
 			/* eslint-enable dot-notation,no-useless-concat */
 		})
