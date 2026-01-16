@@ -264,6 +264,7 @@ export function constructFunction(
 	paramNames: string[],
 	body: string,
 	name: string = 'anonymous',
+	onError?: (error: any) => void,
 ) {
 	// Create a unique identifier for this function...
 	const fnId = Math.random().toString(36).substring(2, 9)
@@ -310,7 +311,11 @@ export function constructFunction(
 			error.stack = error.stack.replace(error.message, enhancedErrorMessage)
 			error.message = enhancedErrorMessage
 
-			// Re-throw the modified error...
+			if (onError) {
+				onError(error)
+				return undefined
+			}
+
 			throw error
 		}
 	}

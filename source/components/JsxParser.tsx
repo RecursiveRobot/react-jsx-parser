@@ -153,7 +153,12 @@ export default class JsxParser extends React.Component<TProps> {
 					)
 					return createFunctionProxy(
 						// eslint-disable-next-line no-new-func
-						constructFunction(paramNames, transpiledBody, this.lastAttributeName),
+						constructFunction(
+							paramNames,
+							transpiledBody,
+							this.lastAttributeName,
+							this.props.onError,
+						),
 						{ ...this.props.bindings, ...scope, ...jsxRenderFunctions },
 					)
 				} catch (error: any) {
