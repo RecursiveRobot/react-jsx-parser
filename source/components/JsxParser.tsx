@@ -235,6 +235,12 @@ export default class JsxParser extends React.Component<TProps> {
 			return this.#parseMemberExpression(expression, scope)
 		case 'NewExpression':
 			const constructor = this.#parseExpression(expression.callee, scope)
+			if (constructor === undefined) {
+				if (this.props.showWarnings) {
+					console.warn(`The expression '${this.#getRawTextForExpression(expression)}' could not be resolved, resulting in an undefined return value.`) // eslint-disable-line no-console
+				}
+				return undefined
+			}
 			// eslint-disable-next-line new-cap
 			return new constructor(...expression.arguments.map(a => this.#parseExpression(a, scope)))
 		case 'ObjectExpression':

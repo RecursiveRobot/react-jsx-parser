@@ -1622,6 +1622,16 @@ describe('JsxParser Component', () => {
 			expect(html).toMatch(new Date().getFullYear().toString())
 		})
 
+		it('handles null constructor calls gracefully', () => {
+			const { html } = render(
+				<JsxParser
+					components={{ Custom }}
+					jsx="<Custom>{new DoesNotExist()}</Custom>"
+				/>,
+			)
+			expect(html).toMatch('')
+		})
+
 		it('supports nested arrow functions', () => {
 			const { rendered } = render(
 				<JsxParser
