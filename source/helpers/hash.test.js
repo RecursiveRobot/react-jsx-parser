@@ -7,7 +7,7 @@ describe('helpers/hash', () => {
 	})
 	it('generates random hashes', () => {
 		const oldMathRandom = Math.random
-		Math.random = jest.fn(() => Math.PI / 10)
+		Math.random = vi.fn(() => Math.PI / 10)
 
 		expect(randomHash('foo')).toEqual('29a766ba')
 		expect(Math.random).toHaveBeenCalledTimes(1)

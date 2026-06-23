@@ -1,5 +1,5 @@
-export declare type ScopedFunction = Function & {
+export type ScopedFunction = Function & {
     scope?: Record<string, any>;
 };
-export declare type FunctionProxy = ProxyHandler<ScopedFunction>;
+export type FunctionProxy = ProxyHandler<ScopedFunction>;
 export declare function createFunctionProxy(fn: ScopedFunction, scope: Record<string, any>): FunctionProxy;

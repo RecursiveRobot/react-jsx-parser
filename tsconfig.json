@@ -2,23 +2,22 @@
   "compileOnSave": false,
   "compilerOptions": {
     "allowSyntheticDefaultImports": true,
-    "baseUrl": ".",
     "esModuleInterop": true,
     "experimentalDecorators": true,
     "importHelpers": true,
-    "jsx": "react",
-    "lib": ["DOM", "DOM.Iterable", "ESNext", "ScriptHost"],
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "ESNext",
-    "moduleResolution": "node",
+    "moduleResolution": "Bundler",
     "noImplicitReturns": true,
     "noUnusedParameters": true,
     "outDir": "./dist",
     "rootDir": "./source",
     "sourceMap": true,
     "strict": true,
-    "target": "ESNext",
+    "target": "ES2022",
     "typeRoots": ["./source/types", "node_modules/@types"],
-    "types": ["node", "jest"]
+    "types": ["node", "vitest/globals", "@testing-library/jest-dom"]
   },
   "include": ["source/**/*.ts", "source/**/*.tsx"],
   "exclude": ["./node_modules", "./jest", "**/*.js", "**/*.test.*"]

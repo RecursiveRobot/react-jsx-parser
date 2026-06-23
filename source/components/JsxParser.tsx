@@ -1,5 +1,4 @@
 /* eslint-disable linebreak-style */
-/* global JSX */
 import * as Acorn from 'acorn'
 import * as AcornJSX from 'acorn-jsx'
 import React, { Fragment, ComponentType, ExoticComponent } from 'react'
@@ -11,7 +10,7 @@ import { parseStyle } from '../helpers/parseStyle'
 import { resolvePath } from '../helpers/resolvePath'
 import { createFunctionProxy } from '../helpers/functionProxy'
 
-type ParsedJSX = JSX.Element | boolean | string
+type ParsedJSX = React.JSX.Element | boolean | string
 type ParsedTree = ParsedJSX | ParsedJSX[] | null
 export type TProps = {
 	allowUnknownElements?: boolean,
@@ -27,9 +26,9 @@ export type TProps = {
 	jsx?: string,
 	onError?: (error: Error) => void,
 	showWarnings?: boolean,
-	renderError?: (props: { error: string }) => JSX.Element | null,
+	renderError?: (props: { error: string }) => React.JSX.Element | null,
 	renderInWrapper?: boolean,
-	renderUnrecognized?: (tagName: string) => JSX.Element | null,
+	renderUnrecognized?: (tagName: string) => React.JSX.Element | null,
 }
 type Scope = Record<string, any>
 
@@ -62,7 +61,7 @@ export default class JsxParser extends React.Component<TProps> {
 	#getRawTextForExpression: (expression: AcornJSX.Expression) => string =
 		(e: AcornJSX.Expression) => this.jsx.slice(e.start, e.end)
 
-	#parseJSX = (jsx: string): JSX.Element | JSX.Element[] | null => {
+	#parseJSX = (jsx: string): React.JSX.Element | React.JSX.Element[] | null => {
 		const parser = Acorn.Parser.extend(AcornJSX.default({
 			autoCloseVoidElements: this.props.autoCloseVoidElements,
 		}))
@@ -332,7 +331,7 @@ export default class JsxParser extends React.Component<TProps> {
 	#parseElement = (
 		element: AcornJSX.JSXElement | AcornJSX.JSXFragment,
 		scope?: Scope,
-	): JSX.Element | JSX.Element[] | null => {
+	): React.JSX.Element | React.JSX.Element[] | null => {
 		const { allowUnknownElements, components, componentsOnly, onError } = this.props
 		const { children: childNodes = [] } = element
 		const openingTag = element.type === 'JSXElement'
@@ -349,7 +348,7 @@ export default class JsxParser extends React.Component<TProps> {
 			.map(tag => tag.trim().toLowerCase()).filter(Boolean)
 
 		if (/^(html|head|body)$/i.test(name)) {
-			return childNodes.map(c => this.#parseElement(c, scope)) as JSX.Element[]
+			return childNodes.map(c => this.#parseElement(c, scope)) as React.JSX.Element[]
 		}
 		const tagName = name.trim().toLowerCase()
 		if (blacklistedTags.indexOf(tagName) !== -1) {
@@ -478,7 +477,7 @@ export default class JsxParser extends React.Component<TProps> {
 		return functionScope
 	}
 
-	render = (): JSX.Element => {
+	render = (): React.JSX.Element => {
 		const jsx = (this.props.jsx || '').trim().replace(/<!DOCTYPE([^>]*)>/g, '')
 
 		this.ParsedChildren = this.#parseJSX(jsx)

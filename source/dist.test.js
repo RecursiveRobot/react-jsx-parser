@@ -1,30 +1,18 @@
 /**
- * @jest-environment node
+ * @vitest-environment node
  */
-/* eslint-disable global-require */
+import { existsSync } from 'fs'
+import { resolve } from 'path'
 
-jest.unmock('../dist/cjs/react-jsx-parser.min')
-jest.unmock('../dist/umd/react-jsx-parser.min')
+const distFile = resolve(import.meta.dirname, '../dist/react-jsx-parser.js')
+const isBuilt = existsSync(distFile)
 
 describe('JSXParser', () => {
-	describe('cjs build', () => {
-		it('should load and parse', () => {
-			const fn = () => require('../dist/cjs/react-jsx-parser.min')
-			expect(fn).not.toThrow()
-		})
-	})
-	// describe('es5 build', () => {
-	// 	it('should load and parse', () => {
-	// 		const fn = () => require('../dist/es5/react-jsx-parser.min')
-	// 		expect(fn).not.toThrow()
-	// 	})
-	// })
-	describe('umd build', () => {
-		it('should load and parse', () => {
-			const fn = () => require('../dist/umd/react-jsx-parser.min')
-			expect(fn).not.toThrow()
+	describe('esm build', () => {
+		// Only runs after `yarn build` has produced the bundle.
+		it.skipIf(!isBuilt)('should load and parse', async () => {
+			// eslint-disable-next-line import/extensions
+			await expect(import('../dist/react-jsx-parser.js')).resolves.toBeDefined()
 		})
 	})
 })
-
-/* eslint-enable global-require */

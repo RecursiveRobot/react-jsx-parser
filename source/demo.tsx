@@ -1,10 +1,10 @@
 /* eslint-disable no-console */
 import React from 'react'
-import ReactDOM from 'react-dom'
-// @ts-expect-error - untyped output file
-import JsxParser from '../dist/umd/react-jsx-parser.min'
+import { createRoot } from 'react-dom/client'
+import JsxParser from './index'
 
-ReactDOM.render(
+const container = document.querySelector('#root')!
+createRoot(container).render(
 	<JsxParser
 		autoCloseVoidElements
 		jsx={`
@@ -14,5 +14,4 @@ ReactDOM.render(
 		onError={console.error}
 		showWarnings
 	/>,
-	document.querySelector('#root'),
 )

@@ -1,7 +1,5 @@
 import { createFunctionProxy } from './functionProxy'
 
-jest.unmock('./functionProxy')
-
 describe('functionProxy', () => {
 	function sum() {
 		return this.a + this.b

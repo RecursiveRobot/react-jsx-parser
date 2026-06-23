@@ -1,5 +1,5 @@
-import React, { ComponentType, ExoticComponent } from 'react';
-export declare type TProps = {
+import { default as React, ComponentType, ExoticComponent } from 'react';
+export type TProps = {
     allowUnknownElements?: boolean;
     autoCloseVoidElements?: boolean;
     bindings?: {
@@ -17,9 +17,9 @@ export declare type TProps = {
     showWarnings?: boolean;
     renderError?: (props: {
         error: string;
-    }) => JSX.Element | null;
+    }) => React.JSX.Element | null;
     renderInWrapper?: boolean;
-    renderUnrecognized?: (tagName: string) => JSX.Element | null;
+    renderUnrecognized?: (tagName: string) => React.JSX.Element | null;
 };
 export default class JsxParser extends React.Component<TProps> {
     #private;
@@ -28,5 +28,5 @@ export default class JsxParser extends React.Component<TProps> {
     private ParsedChildren;
     private lastAttributeName;
     jsx: string;
-    render: () => JSX.Element;
+    render: () => React.JSX.Element;
 }

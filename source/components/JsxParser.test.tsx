@@ -1,12 +1,11 @@
 // @ts-nocheck
 /* eslint-disable function-paren-newline, no-console, no-underscore-dangle */
 import React from 'react'
-import TestUtils from 'react-dom/test-utils'
-import { mount, shallow } from 'enzyme' // eslint-disable-line import/no-extraneous-dependencies
+// eslint-disable-next-line import/no-extraneous-dependencies
+import { render as rtlRender } from '@testing-library/react'
+// eslint-disable-next-line import/no-extraneous-dependencies
+import { vi } from 'vitest'
 import JsxParser from './JsxParser'
-
-jest.unmock('acorn-jsx')
-jest.unmock('./JsxParser')
 
 const Custom = ({ children = [], className, text }) => (
 	<div className={className}>
@@ -22,30 +21,37 @@ describe('JsxParser Component', () => {
 
 	beforeAll(() => {
 		originalConsoleError = console.error
-		console.error = jest.fn()
+		console.error = vi.fn()
 
-		originalJsDomEmit = window._virtualConsole.emit
-		window._virtualConsole.emit = jest.fn()
+		if (window._virtualConsole) {
+			originalJsDomEmit = window._virtualConsole.emit
+			window._virtualConsole.emit = vi.fn()
+		}
 	})
 
 	afterAll(() => {
 		console.error = originalConsoleError
-		window._virtualConsole.emit = originalJsDomEmit
+		if (window._virtualConsole && originalJsDomEmit) {
+			window._virtualConsole.emit = originalJsDomEmit
+		}
 	})
 
 	beforeEach(() => {
 		console.error.mockReset()
-		window._virtualConsole.emit.mockReset()
+		window._virtualConsole?.emit?.mockReset?.()
 		parent = document.createElement('div')
 	})
 
+	// Mounts via Testing Library into `parent`, exposing the class instance through
+	// a ref so tests can still assert on the private `ParsedChildren` field.
 	function render(element) {
-		const wrapper = mount(element, { attachTo: parent })
+		const ref = React.createRef()
+		rtlRender(React.cloneElement(element, { ref }), { container: parent })
 		return {
-			component: wrapper.instance(),
-			html: wrapper.html(),
+			component: ref.current,
+			html: parent.innerHTML,
 			parent,
-			rendered: wrapper.getDOMNode(),
+			rendered: parent.firstChild,
 		}
 	}
 
@@ -272,7 +278,7 @@ describe('JsxParser Component', () => {
 			expect(rendered.childNodes[0].textContent).toEqual('Header')
 
 			const custom = component.ParsedChildren[1]
-			expect(custom instanceof Custom)
+			expect(custom.type).toBe(Custom)
 			expect(custom.props.text).toEqual('Test Text')
 
 			const customHTML = rendered.childNodes[1]
@@ -319,7 +325,7 @@ describe('JsxParser Component', () => {
 			expect(rendered.childNodes).toHaveLength(1)
 
 			const custom = component.ParsedChildren[0]
-			expect(custom instanceof Custom)
+			expect(custom.type).toBe(Custom)
 			expect(custom.props.className).toEqual('blah')
 			expect(custom.props.text).toEqual('Test Text')
 			expect(custom.props.willSpread).toEqual('Will Spread')
@@ -353,7 +359,7 @@ describe('JsxParser Component', () => {
 			expect(rendered.childNodes).toHaveLength(1)
 
 			const custom = component.ParsedChildren[0]
-			expect(custom instanceof Custom)
+			expect(custom.type).toBe(Custom)
 			expect(custom.props.text).toEqual('Bar')
 			expect(custom.props.qux).toEqual('Qux')
 
@@ -380,7 +386,7 @@ describe('JsxParser Component', () => {
 			expect(rendered.childNodes).toHaveLength(1)
 
 			const custom = component.ParsedChildren[0]
-			expect(custom instanceof Custom)
+			expect(custom.type).toBe(Custom)
 			expect(custom.props.text).toEqual('Bar')
 			expect(custom.props.qux).toEqual('Qux')
 
@@ -459,13 +465,13 @@ describe('JsxParser Component', () => {
 		})
 		test('handles fragment shorthand syntax (<></>)', () => {
 			const jsx = '<><>Test</> <>Test</></>'
-			const wrapper = shallow(<JsxParser jsx={jsx} renderInWrapper={false} />)
-			expect(wrapper.html()).toBe('Test Test')
+			const { html } = render(<JsxParser jsx={jsx} renderInWrapper={false} />)
+			expect(html).toBe('Test Test')
 		})
 		test('renders falsy expressions correctly', () => {
 			const jsx = '<b>{false}{undefined}{0}{null}{[]}</b>'
-			const wrapper = shallow(<JsxParser jsx={jsx} renderInWrapper={false} />)
-			expect(wrapper.html()).toBe('<b>0</b>')
+			const { html } = render(<JsxParser jsx={jsx} renderInWrapper={false} />)
+			expect(html).toBe('<b>0</b>')
 		})
 		test('skips over DOCTYPE, html, head, and div if found', () => {
 			const { rendered } = render(
@@ -529,7 +535,7 @@ describe('JsxParser Component', () => {
 			expect(rendered.childNodes[0].textContent).toEqual('Header')
 
 			const custom = component.ParsedChildren[1]
-			expect(custom instanceof Custom)
+			expect(custom.type).toBe(Custom)
 			expect(custom.props.text).toEqual('Test Text')
 
 			const customHTML = rendered.childNodes[1]
@@ -558,7 +564,7 @@ describe('JsxParser Component', () => {
 			expect(rendered.childNodes[0].textContent).toEqual('Header')
 
 			const custom = component.ParsedChildren[1]
-			expect(custom instanceof Custom)
+			expect(custom.type).toBe(Custom)
 			expect(custom.props.text).toEqual('Test Text')
 
 			const customHTML = rendered.childNodes[1]
@@ -575,8 +581,8 @@ describe('JsxParser Component', () => {
 			expect([hr.nodeType, hr.nodeName]).toEqual([Node.ELEMENT_NODE, 'HR'])
 		})
 		test('omits unknown elements and errors if !allowUnknownElements', () => {
-			const onError = jest.fn()
-			const wrapper = mount(
+			const onError = vi.fn()
+			const { html } = render(
 				<JsxParser
 					allowUnknownElements={false}
 					jsx="<foo>Foo</foo><div>div</div><bar>Bar</bar>"
@@ -595,10 +601,10 @@ describe('JsxParser Component', () => {
 					message: expect.stringContaining('<bar> is unrecognized'),
 				}),
 			)
-			expect(wrapper.html()).toMatchSnapshot()
+			expect(html).toMatchSnapshot()
 		})
 		test('renders errors with renderError prop, if supplied', () => {
-			const onError = jest.fn()
+			const onError = vi.fn()
 			// eslint-disable-next-line
 			const renderError = ({ error }) => <div className="error">{error}</div>
 			const { rendered } = render(
@@ -611,8 +617,8 @@ describe('JsxParser Component', () => {
 			expect(rendered.textContent).toMatch(/SyntaxError: Expected corresponding JSX closing tag for <h2>/)
 		})
 		test('re-rendering should update child elements rather than unmount and remount them', () => {
-			const updates = jest.fn()
-			const unmounts = jest.fn()
+			const updates = vi.fn()
+			const unmounts = vi.fn()
 			const components = {
 				Custom: class extends React.Component {
 					componentDidUpdate() { updates() }
@@ -620,14 +626,22 @@ describe('JsxParser Component', () => {
 					render() { return 'Custom element!' }
 				},
 			}
-			const wrapper = mount(
+			const { rerender } = rtlRender(
 				<JsxParser
 					components={components}
 					disableKeyGeneration
 					jsx="<div><p>Hello</p><hr /><Custom /></div>"
 				/>,
+				{ container: parent },
 			)
-			wrapper.setProps({ someProp: true })
+			rerender(
+				<JsxParser
+					components={components}
+					disableKeyGeneration
+					jsx="<div><p>Hello</p><hr /><Custom /></div>"
+					someProp
+				/>,
+			)
 			expect(updates).toHaveBeenCalled()
 			expect(unmounts).not.toHaveBeenCalled()
 		})
@@ -645,7 +659,7 @@ describe('JsxParser Component', () => {
 			)
 
 			expect(component.ParsedChildren).toHaveLength(2)
-			expect(TestUtils.scryRenderedDOMComponentsWithTag(component, 'script')).toHaveLength(0)
+			expect(rendered.querySelectorAll('script')).toHaveLength(0)
 			expect(rendered.childNodes).toHaveLength(2)
 			expect(parent.getElementsByTagName('script')).toHaveLength(0)
 		})
@@ -663,7 +677,7 @@ describe('JsxParser Component', () => {
 			)
 
 			expect(component.ParsedChildren).toHaveLength(2)
-			expect(TestUtils.scryRenderedDOMComponentsWithTag(component, 'script')).toHaveLength(0)
+			expect(rendered.querySelectorAll('script')).toHaveLength(0)
 			expect(rendered.childNodes).toHaveLength(2)
 			expect(parent.getElementsByTagName('script')).toHaveLength(0)
 		})
@@ -732,7 +746,7 @@ describe('JsxParser Component', () => {
 		test('allows no-whitespace-element named custom components to take whitespace', () => {
 			// eslint-disable-next-line react/prop-types
 			const tr = ({ children }) => (<div className="tr">{children}</div>)
-			const { rendered } = render(<JsxParser components={{ tr }} jsx={'<tr> <a href="/url">Text</a> </tr>'} />)
+			const { rendered } = render(<JsxParser components={{ tr }} jsx='<tr> <a href="/url">Text</a> </tr>' />)
 			expect(rendered.childNodes[0].nodeName).toEqual('DIV')
 			expect(rendered.childNodes[0].childNodes).toHaveLength(3)
 
@@ -745,13 +759,13 @@ describe('JsxParser Component', () => {
 		})
 		test('leaves a space between elements as-coded', () => {
 			const jsx = '<b>first</b> <b>second</b>'
-			const wrapper = shallow(<JsxParser jsx={jsx} renderInWrapper={false} />)
-			expect(wrapper.html()).toBe(jsx)
+			const { html } = render(<JsxParser jsx={jsx} renderInWrapper={false} />)
+			expect(html).toBe(jsx)
 		})
 		test('keeps line-breaks', () => {
 			const jsx = '<code class="markdown"># hello\n\na paragraph\n</code>'
-			const wrapper = shallow(<JsxParser jsx={jsx} renderInWrapper={false} />)
-			expect(wrapper.html()).toBe(jsx)
+			const { html } = render(<JsxParser jsx={jsx} renderInWrapper={false} />)
+			expect(html).toBe(jsx)
 		})
 		test('handles whitespace correctly', () => {
 			const { rendered } = render(
@@ -842,7 +856,7 @@ describe('JsxParser Component', () => {
 			expect(component.ParsedChildren[0].props.shouldBeFalse).toBe(false)
 		})
 		test('parses bound object values', () => {
-			const { component } = render(<JsxParser components={{ Custom }} jsx={'<Custom obj={{ foo: "bar", bar: "foo" }} />'} />)
+			const { component } = render(<JsxParser components={{ Custom }} jsx='<Custom obj={{ foo: "bar", bar: "foo" }} />' />)
 
 			expect(component.ParsedChildren).toHaveLength(1)
 			expect(component.ParsedChildren[0].props.obj).toEqual({ foo: 'bar', bar: 'foo' })
@@ -1003,18 +1017,24 @@ describe('JsxParser Component', () => {
 			expect(component.ParsedChildren[3].props).toEqual({ unresolvable: undefined })
 		})
 		test('updates bindings on subsequent renders', () => {
-			const wrapper = mount(
+			const { rerender } = rtlRender(
 				<JsxParser
 					bindings={{ isChecked: true }}
-					jsx={'<input type="checkbox" checked={isChecked} />'}
+					jsx='<input type="checkbox" checked={isChecked} />'
 				/>,
+				{ container: parent },
 			)
 
-			expect(wrapper.find('input')).toHaveLength(1)
-			expect(wrapper.find('input').props().checked).toBe(true)
-			wrapper.setProps({ bindings: { isChecked: false } })
-			expect(wrapper.find('input')).toHaveLength(1)
-			expect(wrapper.find('input').props().checked).toBe(false)
+			expect(parent.querySelectorAll('input')).toHaveLength(1)
+			expect(parent.querySelector('input').checked).toBe(true)
+			rerender(
+				<JsxParser
+					bindings={{ isChecked: false }}
+					jsx='<input type="checkbox" checked={isChecked} />'
+				/>,
+			)
+			expect(parent.querySelectorAll('input')).toHaveLength(1)
+			expect(parent.querySelector('input').checked).toBe(false)
 		})
 		test('can execute binary mathematical operations', () => {
 			const { rendered } = render(<JsxParser jsx="<span>{ 1 + 2 * 4 / 8 - 1 }</span>" />)
@@ -1033,7 +1053,7 @@ describe('JsxParser Component', () => {
 			expect(component.ParsedChildren[0].props.testProp).toEqual(false)
 		})
 		test('can evaluate inequality comparison', () => {
-			const { component } = render(<JsxParser jsx={'<span testProp={1 != "1"} />'} />)
+			const { component } = render(<JsxParser jsx='<span testProp={1 != "1"} />' />)
 			expect(component.ParsedChildren[0].props.testProp).toEqual(false)
 		})
 		test('can evaluate strict equality comparison', () => {
@@ -1041,7 +1061,7 @@ describe('JsxParser Component', () => {
 			expect(component.ParsedChildren[0].props.testProp).toEqual(true)
 		})
 		test('can evaluate strict inequality comparison', () => {
-			const { component } = render(<JsxParser jsx={'<span testProp={1 !== "1"} />'} />)
+			const { component } = render(<JsxParser jsx='<span testProp={1 !== "1"} />' />)
 			expect(component.ParsedChildren[0].props.testProp).toEqual(true)
 		})
 		test('can execute unary plus operations', () => {
@@ -1063,43 +1083,43 @@ describe('JsxParser Component', () => {
 			expect(component.ParsedChildren[0].props.testProp).toEqual(-75)
 		})
 		test('can execute unary NOT operations', () => {
-			const { rendered, component } = render(<JsxParser jsx={'<span testProp={!60}>{ !false && "Yes" }</span>'} />)
+			const { rendered, component } = render(<JsxParser jsx='<span testProp={!60}>{ !false && "Yes" }</span>' />)
 			expect(rendered.childNodes[0].textContent).toEqual('Yes')
 			expect(component.ParsedChildren[0].props.testProp).toEqual(false)
 		})
 		test('can execute unary NOT operations on bindings', () => {
-			const { component } = render(<JsxParser jsx={'<span testProp={!foo}>{ !foo && "Yes" }</span>'} bindings={{ foo: false }} />)
+			const { component } = render(<JsxParser jsx='<span testProp={!foo}>{ !foo && "Yes" }</span>' bindings={{ foo: false }} />)
 			expect(component.ParsedChildren[0].props.testProp).toEqual(true)
 		})
 		test('can evaluate > operator', () => {
-			const { rendered, component } = render(<JsxParser jsx={'<span testProp={1 > 2}>{1 > 2 || "Nope"}</span>'} />)
+			const { rendered, component } = render(<JsxParser jsx='<span testProp={1 > 2}>{1 > 2 || "Nope"}</span>' />)
 			expect(rendered.childNodes[0].textContent).toEqual('Nope')
 			expect(component.ParsedChildren[0].props.testProp).toEqual(false)
 		})
 		test('can evaluate >= operator', () => {
-			const { rendered, component } = render(<JsxParser jsx={'<span testProp={1 >= 2}>{1 >= 2 || "Nope"}</span>'} />)
+			const { rendered, component } = render(<JsxParser jsx='<span testProp={1 >= 2}>{1 >= 2 || "Nope"}</span>' />)
 			expect(rendered.childNodes[0].textContent).toEqual('Nope')
 			expect(component.ParsedChildren[0].props.testProp).toEqual(false)
 		})
 		test('can evaluate < operator', () => {
-			const { rendered, component } = render(<JsxParser jsx={'<span testProp={1 < 2}>{2 < 1 || "Nope"}</span>'} />)
+			const { rendered, component } = render(<JsxParser jsx='<span testProp={1 < 2}>{2 < 1 || "Nope"}</span>' />)
 			expect(rendered.childNodes[0].textContent).toEqual('Nope')
 			expect(component.ParsedChildren[0].props.testProp).toEqual(true)
 		})
 		test('can evaluate <= operator', () => {
-			const { rendered, component } = render(<JsxParser jsx={'<span testProp={1 <= 2}>{2 <= 1 || "Nope"}</span>'} />)
+			const { rendered, component } = render(<JsxParser jsx='<span testProp={1 <= 2}>{2 <= 1 || "Nope"}</span>' />)
 			expect(rendered.childNodes[0].textContent).toEqual('Nope')
 			expect(component.ParsedChildren[0].props.testProp).toEqual(true)
 		})
 		test('will render options', () => {
-			window.foo = jest.fn(() => true)
-			const wrapper = mount(
+			window.foo = vi.fn(() => true)
+			const { html } = render(
 				<JsxParser
 					jsx="<select><option>Some value</option></select>"
 				/>,
 			)
 
-			expect(wrapper.html()).toMatchSnapshot()
+			expect(html).toMatchSnapshot()
 		})
 		describe('can evaluate multi-level property accessors', () => {
 			/* eslint-disable dot-notation,no-useless-concat */
@@ -1237,7 +1257,7 @@ describe('JsxParser Component', () => {
 			test('does not raise error when navigating null or undefined members', () => {
 				const expression = 'does.not.exist'
 				const jsx = `<span foo={${expression}}>{${expression}}</span>`
-				const onError = jest.fn()
+				const onError = vi.fn()
 				const { rendered, component } = render(<JsxParser {...{ bindings, jsx, onError }} />)
 
 				expect(rendered.childNodes[0].textContent).toEqual('')
@@ -1349,7 +1369,7 @@ describe('JsxParser Component', () => {
 		test('void-element named custom components to take children', () => {
 			// eslint-disable-next-line react/prop-types
 			const link = ({ to, children }) => (<a href={to}>{children}</a>)
-			const { rendered } = render(<JsxParser components={{ link }} jsx={'<link to="/url">Text</link>'} />)
+			const { rendered } = render(<JsxParser components={{ link }} jsx='<link to="/url">Text</link>' />)
 			expect(rendered.childNodes[0].nodeName).toEqual('A')
 			expect(rendered.childNodes[0].textContent).toEqual('Text')
 		})
@@ -1386,7 +1406,7 @@ describe('JsxParser Component', () => {
 		})
 	})
 	test('renderError catches errors', () => {
-		const renderError = jest.fn((...args) => console.error(...args))
+		const renderError = vi.fn((...args) => console.error(...args))
 		render(
 			<JsxParser
 				bindings={{ foo: true }}
@@ -1570,7 +1590,7 @@ describe('JsxParser Component', () => {
 		})
 
 		it('should gracefully handle errors inside block-bodied arrow functions', () => {
-			const errorHandler = jest.fn(e => { console.log(e) })
+			const errorHandler = vi.fn(e => { console.log(e) })
 			const { html } = render(
 				<JsxParser
 					components={{ Custom }}
@@ -2182,7 +2202,7 @@ describe('JsxParser Component', () => {
 				})(null)
 			}</span>`
 
-			const onError = jest.fn()
+			const onError = vi.fn()
 			const { html } = render(
 				<JsxParser
 					renderInWrapper={false}
