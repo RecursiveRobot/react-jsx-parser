@@ -1385,6 +1385,17 @@ describe('JsxParser Component', () => {
 			expect(rendered.childNodes).toHaveLength(0)
 		})
 	})
+	test('renderError catches errors', () => {
+		const renderError = jest.fn((...args) => console.error(...args))
+		render(
+			<JsxParser
+				bindings={{ foo: true }}
+				jsx="<div>{foo ? }</div>" // Syntax error - dangling ternary
+				renderError={renderError}
+			/>,
+		)
+		expect(renderError).toHaveBeenCalledWith({ error: expect.stringContaining('SyntaxError: Unexpected token') })
+	})
 	test('supports className prop', () => {
 		const { html } = render(<JsxParser className="foo" jsx="Text" />)
 		expect(html).toMatch('<div class="jsx-parser foo">Text</div>')
