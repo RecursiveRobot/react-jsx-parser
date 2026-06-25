@@ -6,6 +6,7 @@ import { render as rtlRender } from '@testing-library/react'
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { vi } from 'vitest'
 import JsxParser from './JsxParser'
+import { JsxParserError } from '../helpers/errorUtilities'
 
 const Custom = ({ children = [], className, text }) => (
 	<div className={className}>
@@ -593,12 +594,12 @@ describe('JsxParser Component', () => {
 			expect(onError).toHaveBeenCalledTimes(2)
 			expect(onError).toHaveBeenCalledWith(
 				expect.objectContaining({
-					message: expect.stringContaining('<foo> is unrecognized'),
+					message: expect.stringContaining('`<foo>` is unrecognized'),
 				}),
 			)
 			expect(onError).toHaveBeenCalledWith(
 				expect.objectContaining({
-					message: expect.stringContaining('<bar> is unrecognized'),
+					message: expect.stringContaining('`<bar>` is unrecognized'),
 				}),
 			)
 			expect(html).toMatchSnapshot()
@@ -614,7 +615,7 @@ describe('JsxParser Component', () => {
 			expect(onError).toHaveBeenCalledTimes(1)
 			expect(rendered.querySelectorAll('h2')).toHaveLength(0)
 			expect(rendered.querySelectorAll('div')).toHaveLength(1)
-			expect(rendered.textContent).toMatch(/SyntaxError: Expected corresponding JSX closing tag for <h2>/)
+			expect(rendered.textContent).toMatch(/SyntaxError: Expected corresponding JSX closing tag for &lt;h2&gt;/)
 		})
 		test('re-rendering should update child elements rather than unmount and remount them', () => {
 			const updates = vi.fn()
@@ -2227,6 +2228,103 @@ describe('JsxParser Component', () => {
 					message: expect.stringContaining('return input.does.not.exist();'),
 				}),
 			)
+		})
+	})
+	describe('structured errors', () => {
+		test('passes a structured JsxParserError for parse errors', () => {
+			const onError = vi.fn()
+			render(<JsxParser onError={onError} jsx="<h2>No closing tag " />)
+
+			const error = onError.mock.calls[0][0]
+			expect(error).toBeInstanceOf(JsxParserError)
+			expect(error.type).toBe('parse')
+			expect(error.message).toMatch(/SyntaxError/)
+			expect(error.snippet).toContain('>>> ')
+			expect(error.location.line).toBe(1)
+		})
+
+		test('passes offsets (mapped onto the user source) and cause for call errors', () => {
+			const onError = vi.fn()
+			const boom = new Error('boom')
+			const jsx = '<div>{explode()}</div>'
+			render(
+				<JsxParser
+					onError={onError}
+					bindings={{ explode: () => { throw boom } }}
+					jsx={jsx}
+				/>,
+			)
+
+			const error = onError.mock.calls[0][0]
+			expect(error).toBeInstanceOf(JsxParserError)
+			expect(error.type).toBe('call')
+			expect(error.cause).toBe(boom)
+			// Offsets index into the user's original (unwrapped) JSX, not the `<root>` wrapper...
+			expect(error.source).toBe('explode()')
+			expect(jsx.slice(error.location.startOffset, error.location.endOffset)).toBe(error.source)
+			expect(error.snippet).toContain('>>> ')
+		})
+
+		test('reports element validation errors with user-source offsets (no wrapper shift)', () => {
+			const onError = vi.fn()
+			const jsx = '<Unknown />'
+			render(<JsxParser onError={onError} componentsOnly components={{}} jsx={jsx} />)
+
+			const error = onError.mock.calls[0][0]
+			expect(error.type).toBe('unrecognized-component')
+			expect(error.message).toContain('`<Unknown>` is unrecognized')
+			// The element begins at offset 0 of the user JSX — proving the wrapper offset is removed...
+			expect(error.location.startOffset).toBe(0)
+			expect(jsx.slice(error.location.startOffset, error.location.endOffset)).toBe(error.source)
+		})
+
+		test('includes the fileName prop in the error object and detail message', () => {
+			const onError = vi.fn()
+			const boom = new Error('boom')
+			render(
+				<JsxParser
+					onError={onError}
+					fileName="my-template.jsx"
+					bindings={{ explode: () => { throw boom } }}
+					jsx="<div>{explode()}</div>"
+				/>,
+			)
+
+			const error = onError.mock.calls[0][0]
+			expect(error.fileName).toBe('my-template.jsx')
+			expect(error.message).toContain('of `my-template.jsx`')
+		})
+
+		test('omits fileName context from the message when the prop is not supplied', () => {
+			const onError = vi.fn()
+			render(
+				<JsxParser
+					onError={onError}
+					bindings={{ explode: () => { throw new Error('boom') } }}
+					jsx="<div>{explode()}</div>"
+				/>,
+			)
+
+			const error = onError.mock.calls[0][0]
+			expect(error.fileName).toBeUndefined()
+			expect(error.message).not.toContain(' of ')
+		})
+
+		test('passes a structured JsxParserError for runtime errors in block-bodied functions', () => {
+			const onError = vi.fn()
+			const jsx = `<span>{
+				((input) => {
+					return input.does.not.exist();
+				})(null)
+			}</span>`
+			render(<JsxParser renderInWrapper={false} onError={onError} jsx={jsx} />)
+
+			const error = onError.mock.calls[0][0]
+			expect(error).toBeInstanceOf(JsxParserError)
+			expect(error.type).toBe('function-runtime')
+			expect(error.snippet).toContain('>>> ')
+			expect(error.source).toContain('return input.does.not.exist();')
+			expect(error.cause).toBeInstanceOf(Error)
 		})
 	})
 })

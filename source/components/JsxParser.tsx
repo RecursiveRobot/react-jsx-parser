@@ -3,6 +3,7 @@ import * as Acorn from 'acorn'
 import * as AcornJSX from 'acorn-jsx'
 import React, { Fragment, ComponentType, ExoticComponent } from 'react'
 import { transpileFunctionBody, isSpreadElement, constructFunction } from '../helpers/functionUtilities'
+import { JsxParserError, buildErrorFromOffsets, sanitizeHtml } from '../helpers/errorUtilities'
 import ATTRIBUTES from '../constants/attributeNames'
 import { canHaveChildren, canHaveWhitespace } from '../constants/specialTags'
 import { randomHash } from '../helpers/hash'
@@ -23,14 +24,19 @@ export type TProps = {
 	componentsOnly?: boolean,
 	disableFragments?: boolean,
 	disableKeyGeneration?: boolean,
+	fileName?: string,
 	jsx?: string,
-	onError?: (error: Error) => void,
+	onError?: (error: JsxParserError) => void,
 	showWarnings?: boolean,
 	renderError?: (props: { error: string }) => React.JSX.Element | null,
 	renderInWrapper?: boolean,
 	renderUnrecognized?: (tagName: string) => React.JSX.Element | null,
 }
 type Scope = Record<string, any>
+
+// The JSX is parsed wrapped in `<root>...</root>`; this prefix length is used to
+// map AST/Acorn offsets back onto the user's original (unwrapped) source.
+const ROOT_PREFIX_LENGTH = '<root>'.length
 
 /* eslint-disable consistent-return */
 export default class JsxParser extends React.Component<TProps> {
@@ -46,6 +52,7 @@ export default class JsxParser extends React.Component<TProps> {
 		componentsOnly: false,
 		disableFragments: false,
 		disableKeyGeneration: false,
+		fileName: undefined,
 		jsx: '',
 		onError: () => { },
 		showWarnings: false,
@@ -58,8 +65,29 @@ export default class JsxParser extends React.Component<TProps> {
 	private lastAttributeName: string | undefined = undefined
 
 	jsx: string = ''
+	// The user's original (unwrapped) JSX, against which errors are reported, and the
+	// amount by which AST/Acorn offsets must be shifted to map onto it.
+	#userJsx: string = ''
+	#offsetDelta: number = 0
 	#getRawTextForExpression: (expression: AcornJSX.Expression) => string =
 		(e: AcornJSX.Expression) => this.jsx.slice(e.start, e.end)
+
+	// Builds a structured error from the offsets of the given AST node, mapped onto
+	// the user's original source.
+	#buildError = (
+		type: Parameters<typeof buildErrorFromOffsets>[0]['type'],
+		message: string,
+		expression: AcornJSX.Expression,
+		cause?: unknown,
+	): JsxParserError => buildErrorFromOffsets({
+		type,
+		message,
+		source: this.#userJsx || this.jsx,
+		start: expression.start - this.#offsetDelta,
+		end: expression.end - this.#offsetDelta,
+		fileName: this.props.fileName,
+		cause,
+	})
 
 	#parseJSX = (jsx: string): React.JSX.Element | React.JSX.Element[] | null => {
 		const parser = Acorn.Parser.extend(AcornJSX.default({
@@ -67,6 +95,8 @@ export default class JsxParser extends React.Component<TProps> {
 		}))
 		const wrappedJsx = `<root>${jsx}</root>`
 		this.jsx = wrappedJsx
+		this.#userJsx = jsx
+		this.#offsetDelta = ROOT_PREFIX_LENGTH
 		let parsed: AcornJSX.Expression[] = []
 		try {
 			// @ts-ignore - AcornJsx doesn't have typescript typings
@@ -76,8 +106,19 @@ export default class JsxParser extends React.Component<TProps> {
 			return parsed.map(p => this.#parseExpression(p)).filter(Boolean)
 		} catch (error: any) {
 			if (this.props.showWarnings) console.warn(error) // eslint-disable-line no-console
-			if (this.props.onError) this.props.onError(error)
-			if (this.props.renderError) return this.props.renderError({ error: String(error) })
+			// Acorn SyntaxErrors expose `.pos`; map it onto the user's source.
+			const pos = typeof error?.pos === 'number' ? error.pos - this.#offsetDelta : 0
+			const structuredError = buildErrorFromOffsets({
+				type: 'parse',
+				message: sanitizeHtml(String(error)),
+				source: jsx,
+				start: pos,
+				end: pos,
+				fileName: this.props.fileName,
+				cause: error,
+			})
+			if (this.props.onError) this.props.onError(structuredError)
+			if (this.props.renderError) return this.props.renderError({ error: String(structuredError) })
 			return null
 		}
 	}
@@ -114,7 +155,11 @@ export default class JsxParser extends React.Component<TProps> {
 			return arr
 		case 'ArrowFunctionExpression':
 			if (expression.async || expression.generator) {
-				this.props.onError?.(new Error('Async and generator arrow functions are not supported.'))
+				this.props.onError?.(this.#buildError(
+					'unsupported-function',
+					'Async and generator arrow functions are not supported.',
+					expression,
+				))
 			}
 
 			// Parse function body and construct a Function object
@@ -144,6 +189,9 @@ export default class JsxParser extends React.Component<TProps> {
 						(elementJsx, elementExpression, elementScope) => {
 							const elementParser = new JsxParser(this.props)
 							elementParser.jsx = elementJsx
+							// The element JSX is parsed unwrapped, so offsets map directly onto it.
+							elementParser.#userJsx = elementJsx
+							elementParser.#offsetDelta = 0
 							return elementParser.#parseExpression(elementExpression, elementScope)
 						},
 					)
@@ -154,11 +202,17 @@ export default class JsxParser extends React.Component<TProps> {
 							transpiledBody,
 							this.lastAttributeName,
 							this.props.onError,
+							this.props.fileName,
 						),
 						{ ...this.props.bindings, ...scope, ...jsxRenderFunctions },
 					)
 				} catch (error: any) {
-					this.props.onError?.(new Error(`Unable to parse function '${this.#getRawTextForExpression(expression)}': ${error}.`))
+					this.props.onError?.(this.#buildError(
+						'function-parse',
+						`Unable to parse function \`${this.lastAttributeName ?? this.#getRawTextForExpression(expression)}\` => ${error}.`,
+						expression,
+						error,
+					))
 					return undefined
 				}
 			}
@@ -191,7 +245,7 @@ export default class JsxParser extends React.Component<TProps> {
 			const parsedCallee = this.#parseExpression(expression.callee, scope)
 			if (parsedCallee === undefined) {
 				if (this.props.showWarnings) {
-					console.warn(`The expression '${this.#getRawTextForExpression(expression)}' could not be resolved, resulting in an undefined return value.`) // eslint-disable-line no-console
+					console.warn(`The expression \`${this.#getRawTextForExpression(expression)}\` could not be resolved, resulting in an undefined return value.`) // eslint-disable-line no-console
 				}
 				return undefined
 			}
@@ -200,14 +254,24 @@ export default class JsxParser extends React.Component<TProps> {
 				const invocationScope =	{ ...this.props.bindings, ...scope }
 				return Reflect.apply(parsedCallee, invocationScope, args)
 			} catch (error: any) {
-				this.props.onError?.(new Error(`Unable to call expression '${this.#getRawTextForExpression(expression)}': ${error}.`))
+				this.props.onError?.(this.#buildError(
+					'call',
+					`Unable to call expression \`${this.#getRawTextForExpression(expression)}\` => ${error}.`,
+					expression,
+					error,
+				))
 				return undefined
 			}
 		case 'ChainExpression':
 			try {
 				return this.#parseExpression(expression.expression, scope)
 			} catch (error: any) {
-				this.props.onError?.(new Error(`Unable to call expression '${this.#getRawTextForExpression(expression)}': ${error}.`))
+				this.props.onError?.(this.#buildError(
+					'chain',
+					`Unable to call expression \`${this.#getRawTextForExpression(expression)}\` => ${error}.`,
+					expression,
+					error,
+				))
 				return undefined
 			}
 		case 'ConditionalExpression':
@@ -238,7 +302,7 @@ export default class JsxParser extends React.Component<TProps> {
 			const constructor = this.#parseExpression(expression.callee, scope)
 			if (constructor === undefined) {
 				if (this.props.showWarnings) {
-					console.warn(`The expression '${this.#getRawTextForExpression(expression)}' could not be resolved, resulting in an undefined return value.`) // eslint-disable-line no-console
+					console.warn(`The expression \`${this.#getRawTextForExpression(expression)}\` could not be resolved, resulting in an undefined return value.`) // eslint-disable-line no-console
 				}
 				return undefined
 			}
@@ -317,9 +381,14 @@ export default class JsxParser extends React.Component<TProps> {
 			if (typeof member === 'function') return member.bind(parent)
 
 			return member
-		} catch {
+		} catch (error: any) {
 			const name = (object as AcornJSX.MemberExpression)?.name || 'unknown'
-			this.props.onError?.(new Error(`Unable to parse ${name}["${path.join('"]["')}"]}`))
+			this.props.onError?.(this.#buildError(
+				'member-access',
+				`Unable to parse \`${name}["${path.join('"]["')}"]\``,
+				expression,
+				error,
+			))
 		}
 	}
 
@@ -352,18 +421,30 @@ export default class JsxParser extends React.Component<TProps> {
 		}
 		const tagName = name.trim().toLowerCase()
 		if (blacklistedTags.indexOf(tagName) !== -1) {
-			onError!(new Error(`The tag <${name}> is blacklisted, and will not be rendered.`))
+			onError!(this.#buildError(
+				'blacklisted-tag',
+				`The tag \`<${name}>\` is blacklisted, and will not be rendered.`,
+				element,
+			))
 			return null
 		}
 
 		if (name !== '' && !resolvePath(components, name)) {
 			if (componentsOnly) {
-				onError!(new Error(`The component <${name}> is unrecognized, and will not be rendered.`))
+				onError!(this.#buildError(
+					'unrecognized-component',
+					`The component \`<${name}>\` is unrecognized, and will not be rendered.`,
+					element,
+				))
 				return this.props.renderUnrecognized!(name)
 			}
 
 			if (!allowUnknownElements && document.createElement(name) instanceof HTMLUnknownElement) {
-				onError!(new Error(`The tag <${name}> is unrecognized in this browser, and will not be rendered.`))
+				onError!(this.#buildError(
+					'unrecognized-tag',
+					`The tag \`<${name}>\` is unrecognized in this browser, and will not be rendered.`,
+					element,
+				))
 				return this.props.renderUnrecognized!(name)
 			}
 		}

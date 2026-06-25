@@ -1,5 +1,6 @@
 import * as Acorn from 'acorn'
 import * as AcornJSX from 'acorn-jsx'
+import { buildErrorFromLine, trimExcessLeadingWhitespaceFromCodeLines, JsxParserError } from './errorUtilities'
 
 export function isSpreadElement(node: AcornJSX.BaseExpression): node is AcornJSX.SpreadElement {
 	return (node as AcornJSX.SpreadElement).type === 'SpreadElement'
@@ -249,22 +250,12 @@ export function transpileFunctionBody(
 	return [newBody, renderFunctions]
 }
 
-function trimExcessLeadingWhitespaceFromCodeLines(lines: string[]) {
-	const minLeadingWhitespace: number | undefined = lines
-		.filter(l => !l.startsWith('{'))
-		.reduce((min, line) => {
-			const leadingWhitespace = line.match(/^(\s*)\S+/)?.[1]
-			return leadingWhitespace ? Math.min(leadingWhitespace.length, min ?? Infinity) : min
-		}, undefined as number | undefined)
-	// eslint-disable-next-line no-confusing-arrow
-	return lines.map(line => line.replace(new RegExp(`^\\s{${minLeadingWhitespace ?? 0}}`), ''))
-}
-
 export function constructFunction(
 	paramNames: string[],
 	body: string,
 	name: string = 'anonymous',
-	onError?: (error: any) => void,
+	onError?: (error: JsxParserError) => void,
+	fileName?: string,
 ) {
 	// Create a unique identifier for this function...
 	const fnId = Math.random().toString(36).substring(2, 9)
@@ -290,33 +281,24 @@ export function constructFunction(
 			const errorLine = stackLines.find((line: string) => line.includes(sourceUrl))
 			const errorLineNumber = parseInt(errorLine?.match(/:(\d+):/)?.[1], 10) - 3
 
-			// Enhance the original error with the relevant source code...
+			// Build a structured error including the relevant source code...
 			const codeLines = trimExcessLeadingWhitespaceFromCodeLines(trimmedBody.split('\n'))
-			// Include up to 2 lines before the error, excluding the first 3 (the function declaration)
-			const contextStart = Math.max(0, errorLineNumber - 3)
-			// Include up to 2 lines after the error, excluding the last 3 (whitespace and braces)
-			const contextEnd = Math.min(codeLines.length, errorLineNumber + 2)
-			const codeContext = codeLines
-				.slice(contextStart, contextEnd)
-				.map((line, index) => {
-					const lineNum = contextStart + index + 1
-					const marker = lineNum === errorLineNumber ? '>>> ' : '    '
-					return `${marker}${lineNum}: ${line}`
-				})
-				.join('\n')
-
-			// Mutate the original error's stack trace and message to include the source code context...
-			const errorContext = `Error occurred in dynamic function '${name}' at line ${errorLineNumber}:\n================\n${codeContext}\n================`
-			const enhancedErrorMessage = `${error.message}\n\n${errorContext}`
-			error.stack = error.stack.replace(error.message, enhancedErrorMessage)
-			error.message = enhancedErrorMessage
+			const structuredError = buildErrorFromLine({
+				type: 'function-runtime',
+				message: error.message,
+				bodyLines: codeLines,
+				line: errorLineNumber,
+				functionName: name,
+				fileName,
+				cause: error,
+			})
 
 			if (onError) {
-				onError(error)
+				onError(structuredError)
 				return undefined
 			}
 
-			throw error
+			throw structuredError
 		}
 	}
 }

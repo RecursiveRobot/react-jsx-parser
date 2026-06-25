@@ -3,4 +3,6 @@ import JsxParser from './components/JsxParser'
 
 export type { TProps } from './components/JsxParser'
 export type { ScopedFunction, FunctionProxy } from './helpers/functionProxy'
+export { JsxParserError } from './helpers/errorUtilities'
+export type { JsxParserErrorType, JsxParserErrorLocation } from './helpers/errorUtilities'
 export default JsxParser
