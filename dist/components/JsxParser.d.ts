@@ -1,4 +1,5 @@
 import { default as React, ComponentType, ExoticComponent } from 'react';
+import { JsxParserError } from '../helpers/errorUtilities';
 export type TProps = {
     allowUnknownElements?: boolean;
     autoCloseVoidElements?: boolean;
@@ -12,8 +13,9 @@ export type TProps = {
     componentsOnly?: boolean;
     disableFragments?: boolean;
     disableKeyGeneration?: boolean;
+    fileName?: string;
     jsx?: string;
-    onError?: (error: Error) => void;
+    onError?: (error: JsxParserError) => void;
     showWarnings?: boolean;
     renderError?: (props: {
         error: string;
