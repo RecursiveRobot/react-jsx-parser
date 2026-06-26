@@ -23,6 +23,15 @@
 		"import/prefer-default-export": "off",
 		"indent": ["error", "tab"],
 		"lines-between-class-members": "off",
+		"max-len": ["error", {
+			"code": 120,
+			"tabWidth": 2,
+			"ignoreUrls": true,
+			"ignoreComments": false,
+			"ignoreRegExpLiterals": true,
+			"ignoreStrings": true,
+			"ignoreTemplateLiterals": true
+		}],
 		"no-case-declarations": "off",
 		"no-tabs": "off",
 		"no-use-before-define": "off",
