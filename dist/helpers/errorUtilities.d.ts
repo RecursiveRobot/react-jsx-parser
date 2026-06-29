@@ -1,3 +1,4 @@
+import * as AcornJSX from 'acorn-jsx';
 export type JsxParserErrorType = 'parse' | 'unsupported-function' | 'function-parse' | 'function-runtime' | 'call' | 'chain' | 'member-access' | 'blacklisted-tag' | 'unrecognized-component' | 'unrecognized-tag';
 export interface SourceLocation {
     line: number;
@@ -5,25 +6,28 @@ export interface SourceLocation {
     startOffset?: number;
     endOffset?: number;
 }
+export interface SourceInfo {
+    fileName?: string;
+    source: string;
+    location: SourceLocation;
+    loopIndex: number | undefined;
+    astNode?: AcornJSX.Expression;
+}
 export declare class JsxParserError extends Error {
     type: JsxParserErrorType;
-    location?: SourceLocation;
-    fileName?: string;
+    sourceInfo: SourceInfo;
     snippet?: string;
-    source?: string;
     cause?: unknown;
     constructor(message: string, fields: {
         type: JsxParserErrorType;
-        location?: SourceLocation;
-        fileName?: string;
+        sourceInfo: SourceInfo;
         snippet?: string;
-        source?: string;
         cause?: unknown;
     });
 }
 export declare function trimExcessLeadingWhitespaceFromCodeLines(lines: string[]): string[];
 export declare function getLocationFromOffsets(source: string, start: number, end: number): SourceLocation;
-export declare function buildErrorFromOffsets({ type, message, source, start, end, fileName, cause }: {
+export declare function buildErrorFromOffsets({ type, message, source, start, end, fileName, cause, astNode, loopIndex }: {
     type: JsxParserErrorType;
     message: string;
     source: string;
@@ -31,6 +35,8 @@ export declare function buildErrorFromOffsets({ type, message, source, start, en
     end: number;
     fileName?: string;
     cause?: unknown;
+    astNode?: AcornJSX.Expression;
+    loopIndex?: number;
 }): JsxParserError;
 export declare function buildErrorFromLine(opts: {
     type: JsxParserErrorType;

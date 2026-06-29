@@ -7010,13 +7010,11 @@ var Ht = /* @__PURE__ */ u(((e, t) => {
 	}
 })))(), 1), Gt = class e extends Error {
 	type;
-	location;
-	fileName;
+	sourceInfo;
 	snippet;
-	source;
 	cause;
 	constructor(t, n) {
-		super(t), this.name = "JsxParserError", this.type = n.type, this.location = n.location, this.fileName = n.fileName, this.snippet = n.snippet, this.source = n.source, this.cause = n.cause, Object.setPrototypeOf(this, e.prototype);
+		super(t), this.name = "JsxParserError", this.type = n.type, this.sourceInfo = n.sourceInfo, this.snippet = n.snippet, this.cause = n.cause, Object.setPrototypeOf(this, e.prototype);
 	}
 };
 function Kt(e) {
@@ -7045,26 +7043,34 @@ function Yt(e, t, n) {
 		endOffset: Math.max(r, n)
 	};
 }
-function Xt({ type: e, message: t, source: n, start: r, end: i, fileName: a, cause: o }) {
-	let s = Yt(n, r, i), c = qt(n.split("\n"), s.line);
-	return new Gt(Jt(t, `Error occurred at line \`${s.line}\`${a ? ` of \`${a}\`` : ""}:`, c), {
+function Xt({ type: e, message: t, source: n, start: r, end: i, fileName: a, cause: o, astNode: s, loopIndex: c }) {
+	let l = Yt(n, r, i), u = qt(n.split("\n"), l.line);
+	return new Gt(Jt(t, `Error occurred at line \`${l.line}\`${a ? ` of \`${a}\`` : ""}:`, u), {
 		type: e,
-		location: s,
-		fileName: a,
-		snippet: c,
-		source: n.slice(s.startOffset, s.endOffset),
-		cause: o
+		snippet: u,
+		cause: o,
+		sourceInfo: {
+			fileName: a,
+			source: n.slice(l.startOffset, l.endOffset),
+			location: l,
+			loopIndex: c,
+			astNode: s
+		}
 	});
 }
 function Zt(e) {
 	let { type: t, message: n, bodyLines: r, line: i, functionName: a, fileName: o, cause: s } = e, c = qt(r, i), l = `line \`${i}\`${o ? ` of \`${o}\`` : ""}`;
 	return new Gt(Jt(n, a ? `Error occurred in dynamic function \`${a}\` at ${l}:` : `Error occurred at ${l}:`, c), {
 		type: t,
-		location: { line: i },
-		fileName: o,
 		snippet: c,
-		source: r[i - 1],
-		cause: s
+		cause: s,
+		sourceInfo: {
+			fileName: o,
+			source: r[i - 1],
+			location: { line: i },
+			loopIndex: void 0,
+			astNode: void 0
+		}
 	});
 }
 function Qt(e) {
@@ -7366,7 +7372,9 @@ var yn = 6, bn = class i extends e.Component {
 		start: n.start - this.#t,
 		end: n.end - this.#t,
 		fileName: this.props.fileName,
-		cause: r
+		cause: r,
+		astNode: n,
+		loopIndex: this.#i()
 	});
 	#c = (e) => {
 		let t = I.extend(Wt.default({ autoCloseVoidElements: this.props.autoCloseVoidElements })), n = `<root>${e}</root>`;
