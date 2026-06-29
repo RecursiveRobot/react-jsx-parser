@@ -1,5 +1,6 @@
 import { default as React, ComponentType, ExoticComponent } from 'react';
-import { JsxParserError } from '../helpers/errorUtilities';
+import { JsxParserError, SourceLocation } from '../helpers/errorUtilities';
+import * as AcornJSX from 'acorn-jsx';
 export type TProps = {
     allowUnknownElements?: boolean;
     autoCloseVoidElements?: boolean;
@@ -23,6 +24,13 @@ export type TProps = {
     renderInWrapper?: boolean;
     renderUnrecognized?: (tagName: string) => React.JSX.Element | null;
 };
+export interface SourceInfo {
+    fileName?: string;
+    source: string;
+    location: SourceLocation;
+    loopIndex: number | undefined;
+    astNode: AcornJSX.Expression;
+}
 export default class JsxParser extends React.Component<TProps> {
     #private;
     static displayName: string;

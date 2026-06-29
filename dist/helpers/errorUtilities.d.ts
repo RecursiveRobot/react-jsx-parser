@@ -1,5 +1,5 @@
 export type JsxParserErrorType = 'parse' | 'unsupported-function' | 'function-parse' | 'function-runtime' | 'call' | 'chain' | 'member-access' | 'blacklisted-tag' | 'unrecognized-component' | 'unrecognized-tag';
-export interface JsxParserErrorLocation {
+export interface SourceLocation {
     line: number;
     column?: number;
     startOffset?: number;
@@ -7,14 +7,14 @@ export interface JsxParserErrorLocation {
 }
 export declare class JsxParserError extends Error {
     type: JsxParserErrorType;
-    location?: JsxParserErrorLocation;
+    location?: SourceLocation;
     fileName?: string;
     snippet?: string;
     source?: string;
     cause?: unknown;
     constructor(message: string, fields: {
         type: JsxParserErrorType;
-        location?: JsxParserErrorLocation;
+        location?: SourceLocation;
         fileName?: string;
         snippet?: string;
         source?: string;
@@ -22,6 +22,7 @@ export declare class JsxParserError extends Error {
     });
 }
 export declare function trimExcessLeadingWhitespaceFromCodeLines(lines: string[]): string[];
+export declare function getLocationFromOffsets(source: string, start: number, end: number): SourceLocation;
 export declare function buildErrorFromOffsets({ type, message, source, start, end, fileName, cause }: {
     type: JsxParserErrorType;
     message: string;
