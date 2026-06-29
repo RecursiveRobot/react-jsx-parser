@@ -2385,7 +2385,9 @@ describe('JsxParser Component', () => {
 			expect(error.type).toBe('parse')
 			expect(error.message).toMatch(/SyntaxError/)
 			expect(error.snippet).toContain('>>> ')
-			expect(error.location.line).toBe(1)
+			expect(error.sourceInfo.location.line).toBe(1)
+			// Parsing failed, so there is no AST node to attach...
+			expect(error.sourceInfo.astNode).toBeUndefined()
 		})
 
 		test('passes offsets (mapped onto the user source) and cause for call errors', () => {
@@ -2405,9 +2407,33 @@ describe('JsxParser Component', () => {
 			expect(error.type).toBe('call')
 			expect(error.cause).toBe(boom)
 			// Offsets index into the user's original (unwrapped) JSX, not the `<root>` wrapper...
-			expect(error.source).toBe('explode()')
-			expect(jsx.slice(error.location.startOffset, error.location.endOffset)).toBe(error.source)
+			expect(error.sourceInfo.source).toBe('explode()')
+			expect(jsx.slice(error.sourceInfo.location.startOffset, error.sourceInfo.location.endOffset))
+				.toBe(error.sourceInfo.source)
 			expect(error.snippet).toContain('>>> ')
+			// The offending expression's AST node is attached for error handlers to inspect...
+			expect(error.sourceInfo.astNode).not.toBeNull()
+			expect(error.sourceInfo.astNode.type).toBe('CallExpression')
+		})
+
+		test('populates the loopIndex of the map iteration an error is thrown within', () => {
+			const onError = vi.fn()
+			const jsx = '<div>{items.map(item => <span>{explode(item)}</span>)}</div>'
+			render(
+				<JsxParser
+					onError={onError}
+					bindings={{
+						items: ['a', 'b', 'c'],
+						explode: (item: string) => { if (item === 'b') throw new Error('boom') },
+					}}
+					jsx={jsx}
+				/>,
+			)
+
+			const error = onError.mock.calls[0][0]
+			expect(error.type).toBe('call')
+			// The throw came from the second (index 1) source item's iteration...
+			expect(error.sourceInfo.loopIndex).toBe(1)
 		})
 
 		test('reports element validation errors with user-source offsets (no wrapper shift)', () => {
@@ -2419,8 +2445,9 @@ describe('JsxParser Component', () => {
 			expect(error.type).toBe('unrecognized-component')
 			expect(error.message).toContain('`<Unknown>` is unrecognized')
 			// The element begins at offset 0 of the user JSX — proving the wrapper offset is removed...
-			expect(error.location.startOffset).toBe(0)
-			expect(jsx.slice(error.location.startOffset, error.location.endOffset)).toBe(error.source)
+			expect(error.sourceInfo.location.startOffset).toBe(0)
+			expect(jsx.slice(error.sourceInfo.location.startOffset, error.sourceInfo.location.endOffset))
+				.toBe(error.sourceInfo.source)
 		})
 
 		test('includes the fileName prop in the error object and detail message', () => {
@@ -2436,7 +2463,7 @@ describe('JsxParser Component', () => {
 			)
 
 			const error = onError.mock.calls[0][0]
-			expect(error.fileName).toBe('my-template.jsx')
+			expect(error.sourceInfo.fileName).toBe('my-template.jsx')
 			expect(error.message).toContain('of `my-template.jsx`')
 		})
 
@@ -2451,7 +2478,7 @@ describe('JsxParser Component', () => {
 			)
 
 			const error = onError.mock.calls[0][0]
-			expect(error.fileName).toBeUndefined()
+			expect(error.sourceInfo.fileName).toBeUndefined()
 			expect(error.message).not.toContain(' of ')
 		})
 
@@ -2468,7 +2495,7 @@ describe('JsxParser Component', () => {
 			expect(error).toBeInstanceOf(JsxParserError)
 			expect(error.type).toBe('function-runtime')
 			expect(error.snippet).toContain('>>> ')
-			expect(error.source).toContain('return input.does.not.exist();')
+			expect(error.sourceInfo.source).toContain('return input.does.not.exist();')
 			expect(error.cause).toBeInstanceOf(Error)
 		})
 	})

@@ -3,7 +3,7 @@ import * as Acorn from 'acorn'
 import * as AcornJSX from 'acorn-jsx'
 import React, { Fragment, ComponentType, ExoticComponent } from 'react'
 import { transpileFunctionBody, isSpreadElement, constructFunction } from '../helpers/functionUtilities'
-import { JsxParserError, SourceLocation, buildErrorFromOffsets, getLocationFromOffsets, sanitizeHtml } from '../helpers/errorUtilities'
+import { JsxParserError, SourceInfo, buildErrorFromOffsets, getLocationFromOffsets, sanitizeHtml } from '../helpers/errorUtilities'
 import ATTRIBUTES from '../constants/attributeNames'
 import { canHaveChildren, canHaveWhitespace } from '../constants/specialTags'
 import { randomHash } from '../helpers/hash'
@@ -33,28 +33,6 @@ export type TProps = {
 	renderUnrecognized?: (tagName: string) => React.JSX.Element | null,
 }
 type Scope = Record<string, any>
-
-/// Metadata describing where a rendered component originated within the consumer's
-/// template.  Injected as a `sourceInfo` prop into components that opt in by
-/// exposing a truthy `injectSourceInfo` flag on their function, so the consumer
-/// can reference the original source text (e.g. for runtime validation).
-export interface SourceInfo {
-	/// The name of the file the JSX originated from, when supplied via the `fileName` prop.
-	fileName?: string
-	/// The raw JSX text of the full element (opening tag through closing tag, including children).
-	source: string
-	/// The position of the element within the consumer's original (unwrapped) `jsx` source.
-	location: SourceLocation
-	/// The zero-based index of the source item (the `.map()`/array iteration) that produced
-	/// this element.  Every element emitted by the same iteration shares this value — including
-	/// multiple siblings returned together within one fragment — so it identifies the source
-	/// item rather than the element's sibling position.  Those siblings remain distinguishable
-	/// by their differing `source`/`location`.  `0` for an element not produced by such an
-	/// expression (e.g. a statically-written element).
-	loopIndex: number | undefined
-	/// The (AcornJSX) AST node which produced this element.
-	astNode: AcornJSX.Expression
-}
 
 // The JSX is parsed wrapped in `<root>...</root>`; this prefix length is used to
 // map AST/Acorn offsets back onto the user's original (unwrapped) source.
@@ -161,6 +139,8 @@ export default class JsxParser extends React.Component<TProps> {
 		end: expression.end - this.#offsetDelta,
 		fileName: this.props.fileName,
 		cause,
+		astNode: expression,
+		loopIndex: this.#currentLoopIndex(),
 	})
 
 	#parseJSX = (jsx: string): React.JSX.Element | React.JSX.Element[] | null => {

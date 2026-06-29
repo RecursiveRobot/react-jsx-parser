@@ -1,3 +1,5 @@
+import * as AcornJSX from 'acorn-jsx'
+
 /// The categories of errors that can be surfaced to the consumer's `onError` callback.
 /// Each value corresponds to a distinct failure site within the parser.
 export type JsxParserErrorType =
@@ -24,6 +26,31 @@ export interface SourceLocation {
 	endOffset?: number
 }
 
+/// Metadata describing where a rendered element (or the offending source of an
+/// error) originated within the consumer's template.  Injected as a `sourceInfo`
+/// prop into components that opt in by exposing a truthy `injectSourceInfo` flag
+/// on their function (so the consumer can reference the original source text,
+/// e.g. for runtime validation), and embedded on every `JsxParserError`.
+export interface SourceInfo {
+	/// The name of the file the JSX originated from, when supplied via the `fileName` prop.
+	fileName?: string
+	/// The raw JSX text of the full element (opening tag through closing tag, including children).
+	source: string
+	/// The position of the element within the consumer's original (unwrapped) `jsx` source.
+	location: SourceLocation
+	/// The zero-based index of the source item (the `.map()`/array iteration) that produced
+	/// this element.  Every element emitted by the same iteration shares this value — including
+	/// multiple siblings returned together within one fragment — so it identifies the source
+	/// item rather than the element's sibling position.  Those siblings remain distinguishable
+	/// by their differing `source`/`location`.  `0` for an element not produced by such an
+	/// expression (e.g. a statically-written element); `undefined` when no iteration is active.
+	loopIndex: number | undefined
+	/// The (AcornJSX) AST node which produced this element.  Always present for injected
+	/// `sourceInfo`; present on errors only where an AST node is available (e.g. absent for
+	/// Acorn parse failures and stack-trace-derived runtime errors).
+	astNode?: AcornJSX.Expression
+}
+
 /// A structured error surfaced to the consumer's `onError` callback.
 ///
 /// It extends the native `Error` (so existing consumers reading `.message`/`.stack`
@@ -32,13 +59,12 @@ export interface SourceLocation {
 /// processing on the receiving side.
 export class JsxParserError extends Error {
 	type: JsxParserErrorType
-	location?: SourceLocation
-	/// The name of the file the JSX originated from, when supplied via the `fileName` prop.
-	fileName?: string
+	/// Where the offending source originated — its file, raw text, location, producing
+	/// iteration index, and (where available) AST node.  Shares its shape with the
+	/// `sourceInfo` prop injected into opted-in components.
+	sourceInfo: SourceInfo
 	/// The framed, `>>> `-highlighted snippet (offending line +/- 2 context lines).
 	snippet?: string
-	/// The raw offending source code (the relevant slice or line).
-	source?: string
 	/// The original error/value that triggered this error, when one exists.
 	cause?: unknown
 
@@ -46,20 +72,16 @@ export class JsxParserError extends Error {
 		message: string,
 		fields: {
 			type: JsxParserErrorType,
-			location?: SourceLocation,
-			fileName?: string,
+			sourceInfo: SourceInfo,
 			snippet?: string,
-			source?: string,
 			cause?: unknown,
 		},
 	) {
 		super(message)
 		this.name = 'JsxParserError'
 		this.type = fields.type
-		this.location = fields.location
-		this.fileName = fields.fileName
+		this.sourceInfo = fields.sourceInfo
 		this.snippet = fields.snippet
-		this.source = fields.source
 		this.cause = fields.cause
 		// Restore the prototype chain so `instanceof JsxParserError` survives transpilation.
 		Object.setPrototypeOf(this, JsxParserError.prototype)
@@ -124,7 +146,7 @@ export function getLocationFromOffsets(
 
 /// Builds a `JsxParserError` from a source string and the character offsets of the
 /// offending expression within it.  Derives the line/column from the offsets.
-export function buildErrorFromOffsets({ type, message, source, start, end, fileName, cause }: {
+export function buildErrorFromOffsets({ type, message, source, start, end, fileName, cause, astNode, loopIndex }: {
 	type: JsxParserErrorType,
 	message: string,
 	source: string,
@@ -132,6 +154,8 @@ export function buildErrorFromOffsets({ type, message, source, start, end, fileN
 	end: number,
 	fileName?: string,
 	cause?: unknown,
+	astNode?: AcornJSX.Expression,
+	loopIndex?: number,
 }): JsxParserError {
 	const location = getLocationFromOffsets(source, start, end)
 
@@ -140,11 +164,15 @@ export function buildErrorFromOffsets({ type, message, source, start, end, fileN
 
 	return new JsxParserError(buildMessage(message, header, snippet), {
 		type,
-		location,
-		fileName,
 		snippet,
-		source: source.slice(location.startOffset!, location.endOffset!),
 		cause,
+		sourceInfo: {
+			fileName,
+			source: source.slice(location.startOffset!, location.endOffset!),
+			location,
+			loopIndex,
+			astNode,
+		},
 	})
 }
 
@@ -169,11 +197,15 @@ export function buildErrorFromLine(opts: {
 
 	return new JsxParserError(buildMessage(message, header, snippet), {
 		type,
-		location: { line },
-		fileName,
 		snippet,
-		source: bodyLines[line - 1],
 		cause,
+		sourceInfo: {
+			fileName,
+			source: bodyLines[line - 1],
+			location: { line },
+			loopIndex: undefined,
+			astNode: undefined,
+		},
 	})
 }
 
