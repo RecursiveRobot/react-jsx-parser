@@ -159,7 +159,13 @@ export function getClosureBindings(fullExpression: AcornJSX.Expression): string[
 export function getRenderFunction(
 	jsx: string,
 	bindings: Record<string, any>,
-	parseExpression: (body: string, exp: AcornJSX.Expression, scope?: Record<string, any>) => any,
+	parseExpression: (
+		body: string,
+		exp: AcornJSX.Expression,
+		scope?: Record<string, any>,
+		baseOffset?: number,
+	) => any,
+	sourceBaseOffset: number = 0,
 ): (args: Record<string, any>) => any {
 	const parser = Acorn.Parser.extend(AcornJSX.default({
 		autoCloseVoidElements: true,
@@ -169,6 +175,7 @@ export function getRenderFunction(
 		jsx,
 		expression.body[0],
 		{ ...bindings, ...args },
+		sourceBaseOffset,
 	)
 }
 
@@ -218,7 +225,15 @@ export function getAllJsxElements(code: string): (AcornJSX.JSXElement | AcornJSX
 export function transpileFunctionBody(
 	body: string,
 	bindings: Record<string, any>,
-	parseExpression: (jsx: string, exp: AcornJSX.Expression, scope?: Record<string, any>) => any,
+	parseExpression: (
+		jsx: string,
+		exp: AcornJSX.Expression,
+		scope?: Record<string, any>,
+		sourceBaseOffset?: number,
+	) => any,
+	// Maps an offset within `body` onto the consumer's original source, so that elements
+	// rendered from this body can report full-template offsets.  Identity by default.
+	mapBodyOffsetToSource: (bodyOffset: number) => number = bodyOffset => bodyOffset,
 ): [string, Record<string, any>] {
 	const renderFunctions: Record<string, any> = {}
 	const replacements: [string, string][] = []
@@ -231,6 +246,7 @@ export function transpileFunctionBody(
 			body.slice(element.start, element.end),
 			bindings,
 			parseExpression,
+			mapBodyOffsetToSource(element.start),
 		)
 		renderFunctions[renderFunctionName] = renderFunction
 		replacements.push([

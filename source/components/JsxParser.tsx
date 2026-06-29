@@ -3,7 +3,7 @@ import * as Acorn from 'acorn'
 import * as AcornJSX from 'acorn-jsx'
 import React, { Fragment, ComponentType, ExoticComponent } from 'react'
 import { transpileFunctionBody, isSpreadElement, constructFunction } from '../helpers/functionUtilities'
-import { JsxParserError, buildErrorFromOffsets, sanitizeHtml } from '../helpers/errorUtilities'
+import { JsxParserError, SourceLocation, buildErrorFromOffsets, getLocationFromOffsets, sanitizeHtml } from '../helpers/errorUtilities'
 import ATTRIBUTES from '../constants/attributeNames'
 import { canHaveChildren, canHaveWhitespace } from '../constants/specialTags'
 import { randomHash } from '../helpers/hash'
@@ -33,6 +33,28 @@ export type TProps = {
 	renderUnrecognized?: (tagName: string) => React.JSX.Element | null,
 }
 type Scope = Record<string, any>
+
+/// Metadata describing where a rendered component originated within the consumer's
+/// template.  Injected as a `sourceInfo` prop into components that opt in by
+/// exposing a truthy `injectSourceInfo` flag on their function, so the consumer
+/// can reference the original source text (e.g. for runtime validation).
+export interface SourceInfo {
+	/// The name of the file the JSX originated from, when supplied via the `fileName` prop.
+	fileName?: string
+	/// The raw JSX text of the full element (opening tag through closing tag, including children).
+	source: string
+	/// The position of the element within the consumer's original (unwrapped) `jsx` source.
+	location: SourceLocation
+	/// The zero-based index of the source item (the `.map()`/array iteration) that produced
+	/// this element.  Every element emitted by the same iteration shares this value — including
+	/// multiple siblings returned together within one fragment — so it identifies the source
+	/// item rather than the element's sibling position.  Those siblings remain distinguishable
+	/// by their differing `source`/`location`.  `0` for an element not produced by such an
+	/// expression (e.g. a statically-written element).
+	loopIndex: number | undefined
+	/// The (AcornJSX) AST node which produced this element.
+	astNode: AcornJSX.Expression
+}
 
 // The JSX is parsed wrapped in `<root>...</root>`; this prefix length is used to
 // map AST/Acorn offsets back onto the user's original (unwrapped) source.
@@ -69,8 +91,60 @@ export default class JsxParser extends React.Component<TProps> {
 	// amount by which AST/Acorn offsets must be shifted to map onto it.
 	#userJsx: string = ''
 	#offsetDelta: number = 0
+	// Stack of the active `.map()`/iteration indices.  Each tracked function invocation
+	// (see `#trackIterationIndex`) pushes its zero-based call count while it runs, so any
+	// element constructed during that invocation reads the producing source-item index from
+	// the top of the stack.  Nested iterations stack (innermost wins); empty => undefined.
+	// Shared by reference with the per-element parsers spawned for block-bodied functions.
+	#loopIndexStack: number[] = []
+
 	#getRawTextForExpression: (expression: AcornJSX.Expression) => string =
 		(e: AcornJSX.Expression) => this.jsx.slice(e.start, e.end)
+
+	#currentLoopIndex = (): number | undefined => (
+		this.#loopIndexStack.length ? this.#loopIndexStack[this.#loopIndexStack.length - 1] : undefined
+	)
+
+	// Wraps a constructed function so each invocation pushes its zero-based call count onto
+	// `#loopIndexStack` for the duration of the call.  This is how a `.map()`-rendered
+	// element learns which source item produced it: the Nth callback invocation (= Nth item)
+	// makes `#currentLoopIndex()` return N while that callback synchronously builds elements.
+	// A `Proxy` is used (rather than a plain wrapper) so the underlying function's behaviour —
+	// e.g. the scope-merging `apply` trap from `createFunctionProxy` — is preserved.
+	#trackIterationIndex = <T extends Function>(fn: T): T => {
+		let invocationCount = 0
+		return new Proxy(fn, {
+			apply: (target, thisArg, args) => {
+				const index = invocationCount
+				invocationCount += 1
+				this.#loopIndexStack.push(index)
+				try {
+					return Reflect.apply(target as Function, thisArg, args)
+				} finally {
+					this.#loopIndexStack.pop()
+				}
+			},
+		})
+	}
+
+	// Builds the `sourceInfo` injected into opted-in components, mapping the
+	// element's offsets onto the user's original (unwrapped) source.
+	#buildSourceInfo = (
+		element: AcornJSX.JSXElement | AcornJSX.JSXFragment,
+	): SourceInfo => ({
+		fileName: this.props.fileName,
+		// Raw offsets index `this.jsx` (the wrapped source), yielding the exact element text.
+		source: this.#getRawTextForExpression(element),
+		location: getLocationFromOffsets(
+			this.#userJsx || this.jsx,
+			element.start - this.#offsetDelta,
+			element.end - this.#offsetDelta,
+		),
+		// The source-item index of the `.map()`/iteration currently rendering this element
+		// (0 when not produced by one), captured at construction — see `#trackIterationIndex`.
+		loopIndex: this.#currentLoopIndex(),
+		astNode: element,
+	})
 
 	// Builds a structured error from the offsets of the given AST node, mapped onto
 	// the user's original source.
@@ -97,6 +171,7 @@ export default class JsxParser extends React.Component<TProps> {
 		this.jsx = wrappedJsx
 		this.#userJsx = jsx
 		this.#offsetDelta = ROOT_PREFIX_LENGTH
+		this.#loopIndexStack = []
 		let parsed: AcornJSX.Expression[] = []
 		try {
 			// @ts-ignore - AcornJsx doesn't have typescript typings
@@ -175,9 +250,19 @@ export default class JsxParser extends React.Component<TProps> {
 				// Anything other than straight pass-through of the function parameters
 				// requires wrapping the function in an IIFE to handle this mapping logic
 				const paramsRequirePreprocessing = expression.params.some(param => param.type !== 'Identifier')
+				// When preprocessing, the body is the original arrow source wrapped in this IIFE
+				// prefix; the JSX within therefore sits `PREPROCESS_PREFIX.length` chars into the
+				// body, after the arrow's own start. Otherwise the body is the raw block statement.
+				const PREPROCESS_PREFIX = '{ return ('
 				const body = paramsRequirePreprocessing ?
-					`{ return (${this.#getRawTextForExpression(expression)})(${paramNames.join(', ')}); }` :
+					`${PREPROCESS_PREFIX}${this.#getRawTextForExpression(expression)})(${paramNames.join(', ')}); }` :
 					this.#getRawTextForExpression(expression.body)
+				// Maps an offset within `body` back onto the consumer's original (unwrapped) source,
+				// so block-bodied elements report full-template offsets like everything else.
+				const offsetDelta = this.#offsetDelta
+				const mapBodyOffsetToSource = paramsRequirePreprocessing
+					? (bodyOffset: number) => expression.start + (bodyOffset - PREPROCESS_PREFIX.length) - offsetDelta
+					: (bodyOffset: number) => expression.body.start + bodyOffset - offsetDelta
 				try {
 					// JSX elements cannot be rendered by the vanilla JS runtime, so we need to
 					// transpile them into render function calls.  Those render functions are
@@ -186,16 +271,23 @@ export default class JsxParser extends React.Component<TProps> {
 					const [transpiledBody, jsxRenderFunctions] = transpileFunctionBody(
 						body,
 						{ ...this.props.bindings, ...scope },
-						(elementJsx, elementExpression, elementScope) => {
+						(elementJsx, elementExpression, elementScope, sourceBaseOffset = 0) => {
 							const elementParser = new JsxParser(this.props)
 							elementParser.jsx = elementJsx
-							// The element JSX is parsed unwrapped, so offsets map directly onto it.
-							elementParser.#userJsx = elementJsx
-							elementParser.#offsetDelta = 0
+							// Parse offsets are local to the element fragment.  Reporting `#userJsx` as
+							// the full source and offsetting by `-sourceBaseOffset` makes `location`
+							// resolve onto the full template, while `jsx` (the fragment) still yields the
+							// correct raw `source` text by slicing with the local offsets.
+							elementParser.#userJsx = this.#userJsx
+							elementParser.#offsetDelta = -sourceBaseOffset
+							// Share the iteration-index stack so elements rendered by this block-bodied
+							// function pick up the source-item index of the active invocation.
+							elementParser.#loopIndexStack = this.#loopIndexStack
 							return elementParser.#parseExpression(elementExpression, elementScope)
 						},
+						mapBodyOffsetToSource,
 					)
-					return createFunctionProxy(
+					return this.#trackIterationIndex(createFunctionProxy(
 						// eslint-disable-next-line no-new-func
 						constructFunction(
 							paramNames,
@@ -205,7 +297,7 @@ export default class JsxParser extends React.Component<TProps> {
 							this.props.fileName,
 						),
 						{ ...this.props.bindings, ...scope, ...jsxRenderFunctions },
-					)
+					) as unknown as Function)
 				} catch (error: any) {
 					this.props.onError?.(this.#buildError(
 						'function-parse',
@@ -217,10 +309,10 @@ export default class JsxParser extends React.Component<TProps> {
 				}
 			}
 
-			return (...args: any[]) : any => {
+			return this.#trackIterationIndex((...args: any[]) : any => {
 				const functionScope: Record<string, any> = this.#getFunctionScope(scope, expression, args)
 				return this.#parseExpression(expression.body, functionScope)
-			}
+			})
 		case 'BinaryExpression':
 			/* eslint-disable eqeqeq,max-len */
 			switch (expression.operator) {
@@ -509,6 +601,15 @@ export default class JsxParser extends React.Component<TProps> {
 		if (typeof props.style === 'string') {
 			props.style = parseStyle(props.style)
 		}
+
+		// `sourceInfo` is a reserved, parser-owned prop (like `key`): it is injected
+		// after attribute parsing, so it overrides any same-named attribute in the source.
+		// Only resolved custom components can opt in, via a truthy `injectSourceInfo`
+		// flag on their function; HTML elements render from a string tag name and cannot.
+		if (component && (component as { injectSourceInfo?: unknown }).injectSourceInfo) {
+			props.sourceInfo = this.#buildSourceInfo(element)
+		}
+
 		const lowerName = name.toLowerCase()
 		if (lowerName === 'option') {
 			children = children.props.children

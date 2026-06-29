@@ -13,14 +13,14 @@ export type JsxParserErrorType =
 	| 'unrecognized-tag' // The tag is unrecognized in this browser
 
 /// The position of an error within the consumer's original source.
-export interface JsxParserErrorLocation {
+export interface SourceLocation {
 	/// 1-based line number within the source.
 	line: number
 	/// 0-based column within the line.
 	column?: number
-	/// Character offset of the start of the offending source within the source.
+	/// Character offset for the start of the relevant source code section (from the start of the JSX template).
 	startOffset?: number
-	/// Character offset of the end of the offending source within the source.
+	/// Character offset for the end of the relevant source code section (from the start of the JSX template).
 	endOffset?: number
 }
 
@@ -32,7 +32,7 @@ export interface JsxParserErrorLocation {
 /// processing on the receiving side.
 export class JsxParserError extends Error {
 	type: JsxParserErrorType
-	location?: JsxParserErrorLocation
+	location?: SourceLocation
 	/// The name of the file the JSX originated from, when supplied via the `fileName` prop.
 	fileName?: string
 	/// The framed, `>>> `-highlighted snippet (offending line +/- 2 context lines).
@@ -46,7 +46,7 @@ export class JsxParserError extends Error {
 		message: string,
 		fields: {
 			type: JsxParserErrorType,
-			location?: JsxParserErrorLocation,
+			location?: SourceLocation,
 			fileName?: string,
 			snippet?: string,
 			source?: string,
@@ -102,6 +102,26 @@ function buildMessage(readableMessage: string, header: string, snippet: string):
 	return `**${readableMessage}**\n\n${header}\n${snippet}`
 }
 
+/// Derives the `{ line, column, startOffset, endOffset }` location of an expression
+/// within a source string from its character offsets.  Shared by error construction
+/// and template-metadata injection.
+export function getLocationFromOffsets(
+	source: string,
+	start: number,
+	end: number,
+): SourceLocation {
+	const safeStart = Math.max(0, start)
+	const before = source.slice(0, safeStart)
+	const line = before.split('\n').length
+	const column = safeStart - (before.lastIndexOf('\n') + 1)
+	return {
+		line,
+		column,
+		startOffset: safeStart,
+		endOffset: Math.max(safeStart, end),
+	}
+}
+
 /// Builds a `JsxParserError` from a source string and the character offsets of the
 /// offending expression within it.  Derives the line/column from the offsets.
 export function buildErrorFromOffsets({ type, message, source, start, end, fileName, cause }: {
@@ -113,25 +133,17 @@ export function buildErrorFromOffsets({ type, message, source, start, end, fileN
 	fileName?: string,
 	cause?: unknown,
 }): JsxParserError {
-	const safeStart = Math.max(0, start)
-	const before = source.slice(0, safeStart)
-	const line = before.split('\n').length
-	const column = safeStart - (before.lastIndexOf('\n') + 1)
+	const location = getLocationFromOffsets(source, start, end)
 
-	const snippet = buildSnippet(source.split('\n'), line)
-	const header = `Error occurred at line \`${line}\`${fileName ? ` of \`${fileName}\`` : ''}:`
+	const snippet = buildSnippet(source.split('\n'), location.line)
+	const header = `Error occurred at line \`${location.line}\`${fileName ? ` of \`${fileName}\`` : ''}:`
 
 	return new JsxParserError(buildMessage(message, header, snippet), {
 		type,
-		location: {
-			line,
-			column,
-			startOffset: safeStart,
-			endOffset: Math.max(safeStart, end),
-		},
+		location,
 		fileName,
 		snippet,
-		source: source.slice(safeStart, Math.max(safeStart, end)),
+		source: source.slice(location.startOffset!, location.endOffset!),
 		cause,
 	})
 }

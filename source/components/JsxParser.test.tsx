@@ -647,6 +647,151 @@ describe('JsxParser Component', () => {
 			expect(unmounts).not.toHaveBeenCalled()
 		})
 	})
+	describe('sourceInfo injection', () => {
+		const OptedIn: any = ({ children = [], text }) => <div>{text}{children}</div>
+		OptedIn.injectSourceInfo = true
+
+		test('injects sourceInfo into opted-in components', () => {
+			const jsx = '<h1>Header</h1>\n<OptedIn text="Hi">\n  <span>Inner</span>\n</OptedIn>'
+			const { component } = render(
+				<JsxParser
+					components={{ OptedIn }}
+					fileName="template.jsx"
+					jsx={jsx}
+				/>,
+			)
+
+			const opted = component.ParsedChildren.find((c: any) => c?.type === OptedIn)
+			expect(opted.type).toBe(OptedIn)
+
+			const meta = opted.props.sourceInfo
+			expect(meta).toBeDefined()
+			expect(meta.fileName).toEqual('template.jsx')
+			// The raw `source` is the full element, opening tag through closing tag.
+			expect(meta.source).toEqual('<OptedIn text="Hi">\n  <span>Inner</span>\n</OptedIn>')
+			// `<OptedIn>` begins on the second line of the source.
+			expect(meta.location.line).toEqual(2)
+			expect(meta.location.column).toEqual(0)
+			// Offsets are relative to the user's original `jsx` (wrapper subtracted out),
+			// so slicing the source by them round-trips back to the element text.
+			expect(jsx.slice(meta.location.startOffset, meta.location.endOffset)).toEqual(meta.source)
+			// Not produced by a `.map()`/array iteration, so the source-item index is undefined.
+			expect(meta.loopIndex).toBeUndefined()
+			// Parsed AST Node should be populated.
+			expect(meta.astNode).not.toBeNull()
+		})
+
+		// Recursively collects opted-in elements in document order, descending through the
+		// children of intermediate elements (e.g. the fragment a map iteration returns).
+		const collectOptedIn = (node: any, acc: any[] = []): any[] => {
+			if (Array.isArray(node)) {
+				node.forEach((child: any) => collectOptedIn(child, acc))
+			} else if (React.isValidElement(node)) {
+				if (node.type === OptedIn) acc.push(node)
+				else collectOptedIn((node.props as any).children, acc)
+			}
+			return acc
+		}
+
+		test('uses the map iteration index as loopIndex', () => {
+			const jsx = '{items.map(item => <OptedIn text={item} />)}'
+			const { component } = render(
+				<JsxParser components={{ OptedIn }} bindings={{ items: ['a', 'b', 'c'] }} jsx={jsx} />,
+			)
+			const opted = collectOptedIn(component.ParsedChildren)
+			expect(opted).toHaveLength(3)
+			expect(opted.map((c: any) => c.props.sourceInfo.loopIndex)).toEqual([0, 1, 2])
+			// Every instance shares the same source AST node — loopIndex is the only disambiguator.
+			expect(new Set(opted.map((c: any) => c.props.sourceInfo.source)).size).toEqual(1)
+		})
+
+		test('shares one loopIndex across all elements from a single map iteration', () => {
+			const jsx = `{items.map(item => (
+				<>
+					<OptedIn text="Cancel" />
+					<OptedIn text="Accept" />
+				</>
+			))}`
+			const { component } = render(
+				<JsxParser components={{ OptedIn }} bindings={{ items: ['a', 'b', 'c'] }} jsx={jsx} />,
+			)
+			const opted = collectOptedIn(component.ParsedChildren)
+			expect(opted.map((c: any) => c.props.text))
+				.toEqual(['Cancel', 'Accept', 'Cancel', 'Accept', 'Cancel', 'Accept'])
+			// Both elements of an iteration share that iteration's index; it increments per item.
+			expect(opted.map((c: any) => c.props.sourceInfo.loopIndex))
+				.toEqual([0, 0, 1, 1, 2, 2])
+			// Siblings within one iteration remain distinguishable by their differing source.
+			expect(opted[0].props.sourceInfo.source)
+				.not.toEqual(opted[1].props.sourceInfo.source)
+		})
+
+		test('uses the map iteration index for block-bodied map callbacks', () => {
+			const jsx = '{items.map(item => { return <OptedIn text={item} /> })}'
+			const { component } = render(
+				<JsxParser components={{ OptedIn }} bindings={{ items: ['a', 'b', 'c'] }} jsx={jsx} />,
+			)
+			const opted = collectOptedIn(component.ParsedChildren)
+			expect(opted).toHaveLength(3)
+			expect(opted.map((c: any) => c.props.sourceInfo.loopIndex)).toEqual([0, 1, 2])
+		})
+
+		test('reports full-template offsets for block-bodied function elements', () => {
+			const jsx = 'Header\n{items.map(item => { return <OptedIn text={item} />; })}'
+			const { component } = render(
+				<JsxParser components={{ OptedIn }} bindings={{ items: ['a'] }} jsx={jsx} />,
+			)
+			const meta = collectOptedIn(component.ParsedChildren)[0].props.sourceInfo
+			expect(meta.source).toEqual('<OptedIn text={item} />')
+			// Offsets index into the full original `jsx`, not the extracted fragment.
+			expect(jsx.slice(meta.location.startOffset, meta.location.endOffset)).toEqual(meta.source)
+			expect(meta.location.line).toEqual(2)
+		})
+
+		test('reports full-template offsets for block bodies with destructured params', () => {
+			// Destructured params route through the IIFE-wrapped (preprocessing) body path.
+			const jsx = 'X\n{items.map(({ label }) => { return <OptedIn text={label} />; })}'
+			const { component } = render(
+				<JsxParser components={{ OptedIn }} bindings={{ items: [{ label: 'a' }] }} jsx={jsx} />,
+			)
+			const meta = collectOptedIn(component.ParsedChildren)[0].props.sourceInfo
+			expect(meta.source).toEqual('<OptedIn text={label} />')
+			expect(jsx.slice(meta.location.startOffset, meta.location.endOffset)).toEqual(meta.source)
+			expect(meta.location.line).toEqual(2)
+		})
+
+		test('shares loopIndex 0 across statically-written siblings', () => {
+			const jsx = '<OptedIn text="a" />\n<OptedIn text="b" />'
+			const { component } = render(<JsxParser components={{ OptedIn }} jsx={jsx} />)
+			const opted = collectOptedIn(component.ParsedChildren)
+			// Neither is produced by an iteration, so both report 0 (distinguished by source).
+			opted.forEach((c: any) => expect(c.props.sourceInfo.loopIndex).toBeUndefined())
+		})
+
+		test('reports loopIndex 0 for a lone element', () => {
+			const jsx = '<OptedIn text="x" />'
+			const { component } = render(<JsxParser components={{ OptedIn }} jsx={jsx} />)
+			expect(component.ParsedChildren[0].props.sourceInfo.loopIndex).toBeUndefined()
+		})
+
+		test('omits fileName when none is supplied', () => {
+			const jsx = '<OptedIn text="Hi" />'
+			const { component } = render(<JsxParser components={{ OptedIn }} jsx={jsx} />)
+			expect(component.ParsedChildren[0].props.sourceInfo.fileName).toBeUndefined()
+		})
+
+		test('does not inject into components that have not opted in', () => {
+			const jsx = '<Custom text="Hi" />'
+			const { component } = render(<JsxParser components={{ Custom }} jsx={jsx} />)
+			expect(component.ParsedChildren[0].props.sourceInfo).toBeUndefined()
+		})
+
+		test('does not inject into plain HTML elements', () => {
+			const jsx = '<div>Hello</div>'
+			const { component } = render(<JsxParser jsx={jsx} />)
+			expect(component.ParsedChildren[0].props.sourceInfo).toBeUndefined()
+		})
+	})
 	describe('blacklisting & whitelisting', () => {
 		test('strips <script src="..."> tags by default', () => {
 			const { component, rendered } = render(
