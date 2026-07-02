@@ -130,7 +130,7 @@ export default class JsxParser extends React.Component<TProps> {
 		type: Parameters<typeof buildErrorFromOffsets>[0]['type'],
 		message: string,
 		expression: AcornJSX.Expression,
-		cause?: unknown,
+		cause?: Error,
 	): JsxParserError => buildErrorFromOffsets({
 		type,
 		message,

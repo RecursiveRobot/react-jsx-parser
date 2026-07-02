@@ -66,7 +66,7 @@ export class JsxParserError extends Error {
 	/// The framed, `>>> `-highlighted snippet (offending line +/- 2 context lines).
 	snippet?: string
 	/// The original error/value that triggered this error, when one exists.
-	cause?: unknown
+	cause?: Error
 
 	constructor(
 		message: string,
@@ -74,7 +74,7 @@ export class JsxParserError extends Error {
 			type: JsxParserErrorType,
 			sourceInfo: SourceInfo,
 			snippet?: string,
-			cause?: unknown,
+			cause?: Error,
 		},
 	) {
 		super(message)
@@ -153,7 +153,7 @@ export function buildErrorFromOffsets({ type, message, source, start, end, fileN
 	start: number,
 	end: number,
 	fileName?: string,
-	cause?: unknown,
+	cause?: Error,
 	astNode?: AcornJSX.Expression,
 	loopIndex?: number,
 }): JsxParserError {
@@ -186,7 +186,7 @@ export function buildErrorFromLine(opts: {
 	line: number,
 	functionName?: string,
 	fileName?: string,
-	cause?: unknown,
+	cause?: Error,
 }): JsxParserError {
 	const { type, message, bodyLines, line, functionName, fileName, cause } = opts
 	const snippet = buildSnippet(bodyLines, line)
