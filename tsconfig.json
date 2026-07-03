@@ -17,7 +17,7 @@
     "strict": true,
     "target": "ES2022",
     "typeRoots": ["./source/types", "node_modules/@types"],
-    "types": ["node", "vitest/globals", "@testing-library/jest-dom"]
+    "types": ["node"]
   },
   "include": ["source/**/*.ts", "source/**/*.tsx"],
   "exclude": ["./node_modules", "./jest", "**/*.js", "**/*.test.*"]
