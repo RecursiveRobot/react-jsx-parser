@@ -16,7 +16,10 @@ export type JsxParserErrorType =
 
 /// The position of an error within the consumer's original source.
 export interface SourceLocation {
-	/// 1-based line number within the source.
+	/// 1-based line number within the source.  Source-relative wherever character
+	/// offsets are available; for `function-runtime` errors whose body could not be
+	/// mapped back onto the source, this falls back to a line relative to the
+	/// extracted function body (and `startOffset`/`endOffset` are then absent).
 	line: number
 	/// 0-based column within the line.
 	column?: number
@@ -179,6 +182,16 @@ export function buildErrorFromOffsets({ type, message, source, start, end, fileN
 /// Builds a `JsxParserError` from a pre-split source body and a (1-based) line
 /// number.  Used for runtime errors within block-bodied functions, where the line
 /// is derived from the stack trace rather than from character offsets.
+///
+/// The `snippet` and message header are always built from `bodyLines`/`line`, so
+/// they remain relative to the extracted function body.  When `sourceText`,
+/// `startOffset`, and `endOffset` are all supplied (i.e. the body could be mapped
+/// exactly back onto the consumer's original source), the returned `location`
+/// (line/column/offsets) and `sourceInfo.source` are derived from those source
+/// offsets instead — making `location.line` source-relative and satisfying the
+/// `sourceText.slice(startOffset, endOffset) === sourceInfo.source` invariant that
+/// every other error type upholds.  Omit them to keep the legacy body-relative,
+/// offset-free `location = { line }`.
 export function buildErrorFromLine(opts: {
 	type: JsxParserErrorType,
 	message: string,
@@ -187,13 +200,20 @@ export function buildErrorFromLine(opts: {
 	functionName?: string,
 	fileName?: string,
 	cause?: Error,
+	sourceText?: string,
+	startOffset?: number,
+	endOffset?: number,
 }): JsxParserError {
-	const { type, message, bodyLines, line, functionName, fileName, cause } = opts
+	const { type, message, bodyLines, line, functionName, fileName, cause, sourceText, startOffset, endOffset } = opts
 	const snippet = buildSnippet(bodyLines, line)
 	const locationRef = `line \`${line}\`${fileName ? ` of \`${fileName}\`` : ''}`
 	const header = functionName
 		? `Error occurred in dynamic function \`${functionName}\` at ${locationRef}:`
 		: `Error occurred at ${locationRef}:`
+
+	const hasOffsets = sourceText !== undefined && startOffset !== undefined && endOffset !== undefined
+	const location = hasOffsets ? getLocationFromOffsets(sourceText, startOffset, endOffset) : { line }
+	const source = hasOffsets ? sourceText.slice(location.startOffset!, location.endOffset!) : bodyLines[line - 1]
 
 	return new JsxParserError(buildMessage(message, header, snippet), {
 		type,
@@ -201,8 +221,8 @@ export function buildErrorFromLine(opts: {
 		cause,
 		sourceInfo: {
 			fileName,
-			source: bodyLines[line - 1],
-			location: { line },
+			source,
+			location,
 			loopIndex: undefined,
 			astNode: undefined,
 		},

@@ -267,6 +267,10 @@ export default class JsxParser extends React.Component<TProps> {
 						},
 						mapBodyOffsetToSource,
 					)
+					// `mapBodyOffsetToSource` maps offsets in the ORIGINAL (pre-transpile) body onto the
+					// source; JSX render calls are newline-padded (see `transpileFunctionBody`) so the
+					// transpiled body keeps the original line count, letting `constructFunction` resolve
+					// runtime-error offsets even when the body contained JSX.
 					return this.#trackIterationIndex(createFunctionProxy(
 						// eslint-disable-next-line no-new-func
 						constructFunction(
@@ -275,6 +279,8 @@ export default class JsxParser extends React.Component<TProps> {
 							this.lastAttributeName,
 							this.props.onError,
 							this.props.fileName,
+							mapBodyOffsetToSource,
+							this.#userJsx || this.jsx,
 						),
 						{ ...this.props.bindings, ...scope, ...jsxRenderFunctions },
 					) as unknown as Function)

@@ -2,7 +2,7 @@
 /* eslint-disable function-paren-newline, no-console, no-underscore-dangle */
 import React from 'react'
 // eslint-disable-next-line import/no-extraneous-dependencies
-import { render as rtlRender } from '@testing-library/react'
+import { render as rtlRender, fireEvent } from '@testing-library/react'
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { vi } from 'vitest'
 import JsxParser from './JsxParser'
@@ -2497,6 +2497,171 @@ describe('JsxParser Component', () => {
 			expect(error.snippet).toContain('>>> ')
 			expect(error.sourceInfo.source).toContain('return input.does.not.exist();')
 			expect(error.cause).toBeInstanceOf(Error)
+		})
+
+		test('reports source-file offsets for block-bodied function runtime errors', () => {
+			const onError = vi.fn()
+			const jsx = `<span>{
+				((input) => {
+					return input.does.not.exist();
+				})(null)
+			}</span>`
+			render(<JsxParser renderInWrapper={false} onError={onError} jsx={jsx} />)
+
+			const error = onError.mock.calls[0][0]
+			expect(error.type).toBe('function-runtime')
+			// The offending line's offsets index the original `jsx` and round-trip against `source`...
+			expect(error.sourceInfo.location.startOffset).toBeDefined()
+			expect(error.sourceInfo.location.endOffset).toBeDefined()
+			expect(jsx.slice(error.sourceInfo.location.startOffset, error.sourceInfo.location.endOffset))
+				.toBe(error.sourceInfo.source)
+			// `source` is the whole offending source line (indentation preserved).
+			expect(error.sourceInfo.source.trim()).toBe('return input.does.not.exist();')
+		})
+
+		test('reports source-file offsets for a block-bodied handler assigned to a prop (invoked via click)', () => {
+			const onError = vi.fn()
+			const jsx = '<button onClick={() => { this.does.not.exist(); }}>Click Me</button>'
+			// `blacklistedAttrs={[]}` keeps the `on*` handler; the error only surfaces once it runs.
+			// `renderInWrapper={false}` makes the button the root node so the click lands on it.
+			const { rendered } = render(
+				<JsxParser blacklistedAttrs={[]} renderInWrapper={false} onError={onError} jsx={jsx} />,
+			)
+			expect(onError).not.toHaveBeenCalled()
+
+			fireEvent.click(rendered)
+
+			const error = onError.mock.calls[0][0]
+			expect(error).toBeInstanceOf(JsxParserError)
+			expect(error.type).toBe('function-runtime')
+			expect(error.sourceInfo.location.startOffset).toBeDefined()
+			expect(error.sourceInfo.location.endOffset).toBeDefined()
+			// Offsets index the original `jsx` and round-trip against `source`...
+			expect(jsx.slice(error.sourceInfo.location.startOffset, error.sourceInfo.location.endOffset))
+				.toBe(error.sourceInfo.source)
+			expect(error.sourceInfo.source.trim()).toBe('this.does.not.exist();')
+		})
+
+		test('reports the offending line offsets for a multi-line block-bodied prop handler', () => {
+			const onError = vi.fn()
+			const jsx = `<button onClick={() => {
+				const first = 1;
+				this.does.not.exist();
+				const third = 3;
+			}}>
+				Click Me!
+			</button>`
+			const { component } = render(<JsxParser blacklistedAttrs={[]} onError={onError} jsx={jsx} />)
+			// Invoke the constructed handler directly (equivalent to a click) to trigger the throw.
+			component.ParsedChildren[0].props.onClick()
+
+			const error = onError.mock.calls[0][0]
+			expect(error.type).toBe('function-runtime')
+			// Offsets resolve to the specific offending line within the original template...
+			expect(jsx.slice(error.sourceInfo.location.startOffset, error.sourceInfo.location.endOffset))
+				.toBe(error.sourceInfo.source)
+			expect(error.sourceInfo.source.trim()).toBe('this.does.not.exist();')
+		})
+
+		test('reports source-file offsets for a transpiled (JSX-containing) body', () => {
+			const onError = vi.fn()
+			// The block logic throws before returning JSX, so the body is transpiled (the JSX is
+			// replaced by a render call).  Newline-padding keeps line numbers intact, so offsets
+			// still resolve onto the original source.
+			const jsx = `<span>{
+				(() => {
+					const x = null
+					x.missing()
+					return <b>ok</b>
+				})()
+			}</span>`
+			render(<JsxParser renderInWrapper={false} onError={onError} jsx={jsx} />)
+
+			const error = onError.mock.calls[0][0]
+			expect(error.type).toBe('function-runtime')
+			expect(error.sourceInfo.location.startOffset).toBeDefined()
+			expect(jsx.slice(error.sourceInfo.location.startOffset, error.sourceInfo.location.endOffset))
+				.toBe(error.sourceInfo.source)
+			expect(error.sourceInfo.source.trim()).toBe('x.missing()')
+		})
+
+		test('resolves the offending line past a multi-line JSX element in the body', () => {
+			const onError = vi.fn()
+			// A multi-line JSX element is assigned before the throwing line; the newline-padding of
+			// its render call keeps the throwing statement on its original source line.
+			const jsx = `<span>{
+				(() => {
+					const el = (
+						<b>
+							{"ok"}
+						</b>
+					)
+					el.nope.boom()
+					return el
+				})()
+			}</span>`
+			render(<JsxParser renderInWrapper={false} onError={onError} jsx={jsx} />)
+
+			const error = onError.mock.calls[0][0]
+			expect(error.type).toBe('function-runtime')
+			expect(jsx.slice(error.sourceInfo.location.startOffset, error.sourceInfo.location.endOffset))
+				.toBe(error.sourceInfo.source)
+			expect(error.sourceInfo.source.trim()).toBe('el.nope.boom()')
+		})
+
+		test('reports offsets into the original JSX when a render function call fails', () => {
+			const onError = vi.fn()
+			// The block body returns JSX, so `<span>{data.boom()}</span>` is extracted into a render
+			// function.  When that render call runs and `data.boom()` throws, the error must point at
+			// the offending expression's position within the original (pre-transpiled) source.
+			const jsx = `<div>{((data) => {
+				return <span>{data.boom()}</span>
+			})(payload)}</div>`
+			render(
+				<JsxParser
+					renderInWrapper={false}
+					onError={onError}
+					bindings={{ payload: { boom: () => { throw new Error('boom') } } }}
+					jsx={jsx}
+				/>,
+			)
+
+			const error = onError.mock.calls[0][0]
+			expect(error).toBeInstanceOf(JsxParserError)
+			// The failure surfaces from the element parser, not the block-bodied wrapper...
+			expect(error.type).toBe('call')
+			expect(error.sourceInfo.source).toBe('data.boom()')
+			// Offsets index the original `jsx` (not the extracted fragment) and round-trip...
+			expect(jsx.slice(error.sourceInfo.location.startOffset, error.sourceInfo.location.endOffset))
+				.toBe('data.boom()')
+			expect(error.sourceInfo.astNode.type).toBe('CallExpression')
+		})
+
+		test('reports offsets into the original JSX for a failing render call inside a .map callback', () => {
+			const onError = vi.fn()
+			// A block-bodied `.map` callback returns JSX per item; the failing `item.explode()` render
+			// call must still resolve onto the original source, and carry the iteration index.
+			const jsx = `<ul>{items.map(item => {
+				return <li>{item.explode()}</li>
+			})}</ul>`
+			render(
+				<JsxParser
+					renderInWrapper={false}
+					onError={onError}
+					bindings={{
+						items: [{ explode: () => 'ok' }, { explode: () => { throw new Error('boom') } }],
+					}}
+					jsx={jsx}
+				/>,
+			)
+
+			const error = onError.mock.calls[0][0]
+			expect(error.type).toBe('call')
+			expect(error.sourceInfo.source).toBe('item.explode()')
+			expect(jsx.slice(error.sourceInfo.location.startOffset, error.sourceInfo.location.endOffset))
+				.toBe('item.explode()')
+			// The throw came from the second (index 1) source item's iteration...
+			expect(error.sourceInfo.loopIndex).toBe(1)
 		})
 	})
 })

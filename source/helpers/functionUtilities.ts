@@ -1,10 +1,16 @@
 import * as Acorn from 'acorn'
 import * as AcornJSX from 'acorn-jsx'
-import { buildErrorFromLine, trimExcessLeadingWhitespaceFromCodeLines, JsxParserError } from './errorUtilities'
+import { buildErrorFromLine, getLocationFromOffsets, trimExcessLeadingWhitespaceFromCodeLines, JsxParserError } from './errorUtilities'
 
 export function isSpreadElement(node: AcornJSX.BaseExpression): node is AcornJSX.SpreadElement {
 	return (node as AcornJSX.SpreadElement).type === 'SpreadElement'
 }
+
+/// Injected immediately after a transpiled function body's opening `{` to expose the
+/// render-function context as `this`.  Shared between `transpileFunctionBody` (which emits
+/// it) and `constructFunction` (which detects it to map runtime-error offsets back onto the
+/// source).  Keeping this in one place ensures the two stay in lockstep.
+export const RENDER_CONTEXT_PREAMBLE = ' const __jsxRenderContext__ = this;\r\n'
 
 /// Returns an array of all the scoped bindings which the given expression closes over.
 /// This includes all the identifiers, member expressions, function calls, and function parameters.
@@ -249,16 +255,22 @@ export function transpileFunctionBody(
 			mapBodyOffsetToSource(element.start),
 		)
 		renderFunctions[renderFunctionName] = renderFunction
+		// The render call collapses the (potentially multi-line) JSX element onto a single line.
+		// Suffix it with a newline per additional source line so the transpiled body keeps the
+		// same line count as the original — this preserves line numbers (and therefore the
+		// offsets derived from them) for runtime errors elsewhere in the body.
+		const elementText = body.slice(element.start, element.end)
+		const extraLines = elementText.split('\n').length - 1
 		replacements.push([
-			`${body.slice(element.start, element.end)}`,
-			`__jsxRenderContext__.${renderFunctionName}({ ${getClosureBindings(element).join(', ')} })`,
+			elementText,
+			`__jsxRenderContext__.${renderFunctionName}({ ${getClosureBindings(element).join(', ')} })${'\n'.repeat(extraLines)}`,
 		])
 	})
 
 	if (!replacements.length) return [body, {}]
 
 	// Prepend the render function context to the body...
-	let newBody = `{ const __jsxRenderContext__ = this;\r\n${body.slice(1)}`
+	let newBody = `{${RENDER_CONTEXT_PREAMBLE}${body.slice(1)}`
 	// Replace the JSX expressions with their render function calls...
 	replacements.forEach(([expression, renderCall]) => {
 		newBody = newBody.replace(expression, renderCall)
@@ -272,6 +284,13 @@ export function constructFunction(
 	name: string = 'anonymous',
 	onError?: (error: JsxParserError) => void,
 	fileName?: string,
+	// Maps an offset within the ORIGINAL (pre-transpile) block-statement text onto the
+	// consumer's source.  Supplied whenever the body's line structure is preserved (no IIFE
+	// preprocessing); `sourceText` is that original source, needed to slice `sourceInfo.source`
+	// and derive line/column.  When either is omitted the error stays body-relative and
+	// offset-free (legacy behaviour).
+	mapBodyOffsetToSource?: (bodyOffset: number) => number,
+	sourceText?: string,
 ) {
 	// Create a unique identifier for this function...
 	const fnId = Math.random().toString(36).substring(2, 9)
@@ -299,6 +318,44 @@ export function constructFunction(
 
 			// Build a structured error including the relevant source code...
 			const codeLines = trimExcessLeadingWhitespaceFromCodeLines(trimmedBody.split('\n'))
+
+			// When the body's line structure is preserved, resolve the offending line's source
+			// offsets so the error carries LSP-usable offsets.
+			const rawLines = trimmedBody.split('\n')
+			let startOffset: number | undefined
+			let endOffset: number | undefined
+			if (
+				mapBodyOffsetToSource && sourceText !== undefined &&
+				Number.isFinite(errorLineNumber) && errorLineNumber >= 1 && errorLineNumber <= rawLines.length
+			) {
+				const braceMatch = body.match(/^\{{1}([\S\s]*)\}{1}$/)
+				const afterBrace = braceMatch?.[1] ?? body
+
+				if (afterBrace.startsWith(RENDER_CONTEXT_PREAMBLE)) {
+					// The body was transpiled: JSX elements became render calls of a different length,
+					// so character offsets no longer align — but the newline-padded render calls keep
+					// the line COUNT intact.  Resolve the offending SOURCE line by number (drift-proof)
+					// and highlight the whole line.  `- 2` absorbs the injected preamble line and its
+					// trailing newline (see `RENDER_CONTEXT_PREAMBLE`).
+					const braceOffset = mapBodyOffsetToSource(0)
+					const braceLine = getLocationFromOffsets(sourceText, braceOffset, braceOffset).line
+					const errorSourceLine = braceLine + errorLineNumber - 2
+					const sourceLines = sourceText.split('\n')
+					if (errorSourceLine >= 1 && errorSourceLine <= sourceLines.length) {
+						startOffset = sourceLines.slice(0, errorSourceLine - 1).reduce((n, l) => n + l.length + 1, 0)
+						endOffset = startOffset + sourceLines[errorSourceLine - 1].length
+					}
+				} else {
+					// Non-transpiled: `trimmedBody` maps onto the body by a constant prefix delta (the
+					// stripped `{` plus any stripped leading blank lines), so map the offending line's
+					// character offsets directly — this stays clamped to the body's content.
+					const prefixDelta = (braceMatch ? 1 : 0) + (afterBrace.match(/^\n+/)?.[0].length ?? 0)
+					const lineStart = rawLines.slice(0, errorLineNumber - 1).reduce((n, l) => n + l.length + 1, 0)
+					startOffset = mapBodyOffsetToSource(lineStart + prefixDelta)
+					endOffset = mapBodyOffsetToSource(lineStart + rawLines[errorLineNumber - 1].length + prefixDelta)
+				}
+			}
+
 			const structuredError = buildErrorFromLine({
 				type: 'function-runtime',
 				message: error.message,
@@ -307,6 +364,9 @@ export function constructFunction(
 				functionName: name,
 				fileName,
 				cause: error,
+				sourceText: startOffset !== undefined ? sourceText : undefined,
+				startOffset,
+				endOffset,
 			})
 
 			if (onError) {
