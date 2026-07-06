@@ -359,5 +359,41 @@ describe('getAllJsxElements', () => {
 				/* eslint-enable no-regex-spaces */
 			}
 		})
+		it('maps the offending line onto source offsets when a mapping is supplied', () => {
+			expect.assertions(6)
+			// The body sits at offset `prefix.length` within `sourceText`; the prefix contains a
+			// newline so the *source* line (3) differs from the *body* line (2), proving the two
+			// coordinate systems are independent.
+			const prefix = 'AAA\nBBB'
+			const body = 'const line_one = 1;\nthrow new Error("boom");\nconst line_three = 3;'
+			const sourceText = `${prefix}${body}`
+			const func = constructFunction([], body, 'fn', undefined, undefined, o => o + prefix.length, sourceText)
+			try {
+				func()
+			} catch (error) {
+				const { line, column, startOffset, endOffset } = error.sourceInfo.location
+				// Offsets index the original source and round-trip against `sourceInfo.source`...
+				expect(sourceText.slice(startOffset, endOffset)).toBe('throw new Error("boom");')
+				expect(error.sourceInfo.source).toBe('throw new Error("boom");')
+				expect(startOffset).toBe(prefix.length + 'const line_one = 1;\n'.length)
+				// location is source-relative...
+				expect(line).toBe(3)
+				expect(column).toBe(0)
+				// ...while the human snippet/message stays body-relative.
+				expect(error.message).toMatch(/at line `2`:/)
+			}
+		})
+		it('omits offsets and stays body-relative when no mapping is supplied', () => {
+			expect.assertions(3)
+			const body = 'const a = 1;\nthrow new Error("boom");\nconst c = 3;'
+			const func = constructFunction([], body)
+			try {
+				func()
+			} catch (error) {
+				expect(error.sourceInfo.location).toEqual({ line: 2 })
+				expect(error.sourceInfo.location.startOffset).toBeUndefined()
+				expect(error.sourceInfo.source).toBe('throw new Error("boom");')
+			}
+		})
 	})
 })

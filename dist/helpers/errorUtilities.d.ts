@@ -46,5 +46,8 @@ export declare function buildErrorFromLine(opts: {
     functionName?: string;
     fileName?: string;
     cause?: Error;
+    sourceText?: string;
+    startOffset?: number;
+    endOffset?: number;
 }): JsxParserError;
 export declare function sanitizeHtml(html: string): string;

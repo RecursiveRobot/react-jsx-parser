@@ -7059,15 +7059,15 @@ function Xt({ type: e, message: t, source: n, start: r, end: i, fileName: a, cau
 	});
 }
 function Zt(e) {
-	let { type: t, message: n, bodyLines: r, line: i, functionName: a, fileName: o, cause: s } = e, c = qt(r, i), l = `line \`${i}\`${o ? ` of \`${o}\`` : ""}`;
-	return new Gt(Jt(n, a ? `Error occurred in dynamic function \`${a}\` at ${l}:` : `Error occurred at ${l}:`, c), {
+	let { type: t, message: n, bodyLines: r, line: i, functionName: a, fileName: o, cause: s, sourceText: c, startOffset: l, endOffset: u } = e, d = qt(r, i), f = `line \`${i}\`${o ? ` of \`${o}\`` : ""}`, p = a ? `Error occurred in dynamic function \`${a}\` at ${f}:` : `Error occurred at ${f}:`, m = c !== void 0 && l !== void 0 && u !== void 0, h = m ? Yt(c, l, u) : { line: i }, g = m ? c.slice(h.startOffset, h.endOffset) : r[i - 1];
+	return new Gt(Jt(n, p, d), {
 		type: t,
-		snippet: c,
+		snippet: d,
 		cause: s,
 		sourceInfo: {
 			fileName: o,
-			source: r[i - 1],
-			location: { line: i },
+			source: g,
+			location: h,
 			loopIndex: void 0,
 			astNode: void 0
 		}
@@ -7088,7 +7088,8 @@ function Qt(e) {
 function $t(e) {
 	return e.type === "SpreadElement";
 }
-function en(e) {
+var en = " const __jsxRenderContext__ = this;\r\n";
+function tn(e) {
 	let t = /* @__PURE__ */ new Set(), n = (e, r = /* @__PURE__ */ new Set()) => {
 		if (e) switch (e.type) {
 			case "Identifier":
@@ -7184,14 +7185,14 @@ function en(e) {
 	};
 	return n(e), Array.from(t.values());
 }
-function tn(e, t, n, r = 0) {
+function nn(e, t, n, r = 0) {
 	let i = I.extend(Wt.default({ autoCloseVoidElements: !0 })).parse(e, { ecmaVersion: "latest" });
 	return (a) => n(e, i.body[0], {
 		...t,
 		...a
 	}, r);
 }
-function nn(e) {
+function rn(e) {
 	let t = I.extend(Wt.default({ autoCloseVoidElements: !0 })).parse(`function dummy() ${e}`, { ecmaVersion: "latest" }), n = [], r = (e) => {
 		if (e) switch (e.type) {
 			case "JSXElement":
@@ -7209,51 +7210,67 @@ function nn(e) {
 	};
 	return r(t), n;
 }
-function rn(e, t, n, r = (e) => e) {
+function an(e, t, n, r = (e) => e) {
 	let i = {}, a = [];
-	if (nn(e).forEach((o, s) => {
+	if (rn(e).forEach((o, s) => {
 		let c = `renderJSXElementWrapper_${s}`;
-		i[c] = tn(e.slice(o.start, o.end), t, n, r(o.start)), a.push([`${e.slice(o.start, o.end)}`, `__jsxRenderContext__.${c}({ ${en(o).join(", ")} })`]);
+		i[c] = nn(e.slice(o.start, o.end), t, n, r(o.start));
+		let l = e.slice(o.start, o.end), u = l.split("\n").length - 1;
+		a.push([l, `__jsxRenderContext__.${c}({ ${tn(o).join(", ")} })${"\n".repeat(u)}`]);
 	}), !a.length) return [e, {}];
-	let o = `{ const __jsxRenderContext__ = this;\r\n${e.slice(1)}`;
+	let o = `{${en}${e.slice(1)}`;
 	return a.forEach(([e, t]) => {
 		o = o.replace(e, t);
 	}), [o, i];
 }
-function an(e, t, n = "anonymous", r, i) {
-	let a = `dynamic-${n}-${Math.random().toString(36).substring(2, 9)}.js`, o = t.match(/^\{{1}([\S\s]*)\}{1}$/)?.[1] ?? t;
-	o = o.replace(/^\n+|\n+$/g, "");
-	let s = `//# sourceURL=${a}\n${o}`, c = Function(...e, s);
+function on(e, t, n = "anonymous", r, i, a, o) {
+	let s = `dynamic-${n}-${Math.random().toString(36).substring(2, 9)}.js`, c = t.match(/^\{{1}([\S\s]*)\}{1}$/)?.[1] ?? t;
+	c = c.replace(/^\n+|\n+$/g, "");
+	let l = `//# sourceURL=${s}\n${c}`, u = Function(...e, l);
 	return function(...e) {
 		try {
-			return c.apply(this, e);
+			return u.apply(this, e);
 		} catch (e) {
-			let t = e.stack.split("\n").find((e) => e.includes(a)), s = parseInt(t?.match(/:(\d+):/)?.[1], 10) - 3, c = Kt(o.split("\n")), l = Zt({
+			let l = e.stack.split("\n").find((e) => e.includes(s)), u = parseInt(l?.match(/:(\d+):/)?.[1], 10) - 3, d = Kt(c.split("\n")), f = c.split("\n"), p, m;
+			if (a && o !== void 0 && Number.isFinite(u) && u >= 1 && u <= f.length) {
+				let e = t.match(/^\{{1}([\S\s]*)\}{1}$/), n = e?.[1] ?? t;
+				if (n.startsWith(" const __jsxRenderContext__ = this;\r\n")) {
+					let e = a(0), t = Yt(o, e, e).line + u - 2, n = o.split("\n");
+					t >= 1 && t <= n.length && (p = n.slice(0, t - 1).reduce((e, t) => e + t.length + 1, 0), m = p + n[t - 1].length);
+				} else {
+					let t = +!!e + (n.match(/^\n+/)?.[0].length ?? 0), r = f.slice(0, u - 1).reduce((e, t) => e + t.length + 1, 0);
+					p = a(r + t), m = a(r + f[u - 1].length + t);
+				}
+			}
+			let h = Zt({
 				type: "function-runtime",
 				message: e.message,
-				bodyLines: c,
-				line: s,
+				bodyLines: d,
+				line: u,
 				functionName: n,
 				fileName: i,
-				cause: e
+				cause: e,
+				sourceText: p === void 0 ? void 0 : o,
+				startOffset: p,
+				endOffset: m
 			});
 			if (r) {
-				r(l);
+				r(h);
 				return;
 			}
-			throw l;
+			throw h;
 		}
 	};
 }
 //#endregion
 //#region source/constants/attributeNames.ts
-var on = {
+var sn = {
 	class: "className",
 	for: "htmlFor",
 	maxlength: "maxLength",
 	colspan: "colSpan",
 	rowspan: "rowSpan"
-}, sn = [
+}, cn = [
 	"area",
 	"base",
 	"br",
@@ -7270,45 +7287,45 @@ var on = {
 	"source",
 	"track",
 	"wbr"
-], cn = [
+], ln = [
 	"table",
 	"tbody",
 	"tfoot",
 	"thead",
 	"tr"
 ];
-function ln(e) {
-	return sn.indexOf(e.toLowerCase()) === -1;
-}
 function un(e) {
-	return cn.indexOf(e.toLowerCase()) !== -1;
+	return cn.indexOf(e.toLowerCase()) === -1;
+}
+function dn(e) {
+	return ln.indexOf(e.toLowerCase()) !== -1;
 }
 //#endregion
 //#region source/helpers/hash.ts
-var dn = (e = "", t = 16) => {
+var fn = (e = "", t = 16) => {
 	let n = String(e), r = 0;
 	return n.split("").forEach((e) => {
 		r = (r << 5) - r + e.charCodeAt(0), r &= r;
 	}), Math.abs(r).toString(t);
-}, fn = () => dn(Math.random().toString()), pn = (e) => e.replace(/([A-Z])([A-Z])/g, "$1 $2").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[^a-zA-Z\u00C0-\u00ff]/g, " ").toLowerCase().split(" ").filter((e) => e).map((e, t) => t > 0 ? e[0].toUpperCase() + e.slice(1) : e).join(""), mn = (e) => {
+}, pn = () => fn(Math.random().toString()), mn = (e) => e.replace(/([A-Z])([A-Z])/g, "$1 $2").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[^a-zA-Z\u00C0-\u00ff]/g, " ").toLowerCase().split(" ").filter((e) => e).map((e, t) => t > 0 ? e[0].toUpperCase() + e.slice(1) : e).join(""), hn = (e) => {
 	switch (typeof e) {
 		case "string": return e.split(";").filter((e) => e).reduce((e, t) => {
 			let n = t.slice(0, t.indexOf(":")).trim(), r = t.slice(t.indexOf(":") + 1).trim();
 			return {
 				...e,
-				[pn(n)]: r
+				[mn(n)]: r
 			};
 		}, {});
 		case "object": return e;
 		default: return;
 	}
-}, hn = (e) => e == null || e === "" ? [] : e.split("."), gn = (e, t) => {
+}, gn = (e) => e == null || e === "" ? [] : e.split("."), _n = (e, t) => {
 	let [n, ...r] = t;
-	if (!(e == null || n == null)) return r.length === 0 ? e[n] : gn(e[n], r);
-}, _n = (e, t) => gn(e, hn(t));
+	if (!(e == null || n == null)) return r.length === 0 ? e[n] : _n(e[n], r);
+}, vn = (e, t) => _n(e, gn(t));
 //#endregion
 //#region source/helpers/functionProxy.ts
-function vn(e, t) {
+function yn(e, t) {
 	let n = e;
 	return n.scope = t, new Proxy(n, { apply: (e, t, n) => Reflect.apply(e, {
 		...e.scope,
@@ -7317,7 +7334,7 @@ function vn(e, t) {
 }
 //#endregion
 //#region source/components/JsxParser.tsx
-var yn = 6, bn = class i extends e.Component {
+var bn = 6, xn = class i extends e.Component {
 	static displayName = "JsxParser";
 	static defaultProps = {
 		allowUnknownElements: !0,
@@ -7378,7 +7395,7 @@ var yn = 6, bn = class i extends e.Component {
 	});
 	#c = (e) => {
 		let t = I.extend(Wt.default({ autoCloseVoidElements: this.props.autoCloseVoidElements })), n = `<root>${e}</root>`;
-		this.jsx = n, this.#e = e, this.#t = yn, this.#n = [];
+		this.jsx = n, this.#e = e, this.#t = bn, this.#n = [];
 		let r = [];
 		try {
 			return r = t.parse(n, { ecmaVersion: "latest" }), r = r.body[0].expression.children || [], r.map((e) => this.#l(e)).filter(Boolean);
@@ -7403,7 +7420,7 @@ var yn = 6, bn = class i extends e.Component {
 			case "JSXFragment": return this.lastAttributeName = void 0, this.#f(e, n);
 			case "JSXExpressionContainer": return this.#l(e.expression, n);
 			case "JSXText":
-				let a = this.props.disableKeyGeneration ? void 0 : fn();
+				let a = this.props.disableKeyGeneration ? void 0 : pn();
 				return this.props.disableFragments ? e.value : /* @__PURE__ */ r(t, { children: e.value }, a);
 			case "ArrayExpression":
 				let o = [];
@@ -7426,14 +7443,14 @@ var yn = 6, bn = class i extends e.Component {
 						}
 					}), r = e.params.some((e) => e.type !== "Identifier"), a = r ? `{ return (${this.#r(e)})(${t.join(", ")}); }` : this.#r(e.body), o = this.#t, s = r ? (t) => e.start + (t - 10) - o : (t) => e.body.start + t - o;
 					try {
-						let [e, r] = rn(a, {
+						let [e, r] = an(a, {
 							...this.props.bindings,
 							...n
 						}, (e, t, n, r = 0) => {
 							let a = new i(this.props);
 							return a.jsx = e, a.#e = this.#e, a.#t = -r, a.#n = this.#n, a.#l(t, n);
 						}, s);
-						return this.#a(vn(an(t, e, this.lastAttributeName, this.props.onError, this.props.fileName), {
+						return this.#a(yn(on(t, e, this.lastAttributeName, this.props.onError, this.props.fileName, s, this.#e || this.jsx), {
 							...this.props.bindings,
 							...n,
 							...r
@@ -7553,28 +7570,28 @@ var yn = 6, bn = class i extends e.Component {
 		if (/^(html|head|body)$/i.test(d)) return c.map((e) => this.#f(e, r));
 		let m = d.trim().toLowerCase();
 		if (p.indexOf(m) !== -1) return s(this.#s("blacklisted-tag", `The tag \`<${d}>\` is blacklisted, and will not be rendered.`, n)), null;
-		if (d !== "" && !_n(a, d)) {
+		if (d !== "" && !vn(a, d)) {
 			if (o) return s(this.#s("unrecognized-component", `The component \`<${d}>\` is unrecognized, and will not be rendered.`, n)), this.props.renderUnrecognized(d);
 			if (!i && document.createElement(d) instanceof HTMLUnknownElement) return s(this.#s("unrecognized-tag", `The tag \`<${d}>\` is unrecognized in this browser, and will not be rendered.`, n)), this.props.renderUnrecognized(d);
 		}
-		let h, g = n.type === "JSXElement" ? _n(a, d) : t;
-		(g || ln(d)) && (h = c.map((e) => this.#l(e, r)), !g && !un(d) && (h = h.filter((e) => typeof e != "string" || !/^\s*$/.test(e))), h.length === 0 ? h = void 0 : h.length === 1 ? [h] = h : h.length > 1 && !this.props.disableKeyGeneration && (h = h.map((e, t) => e?.type && !e?.key ? {
+		let h, g = n.type === "JSXElement" ? vn(a, d) : t;
+		(g || un(d)) && (h = c.map((e) => this.#l(e, r)), !g && !dn(d) && (h = h.filter((e) => typeof e != "string" || !/^\s*$/.test(e))), h.length === 0 ? h = void 0 : h.length === 1 ? [h] = h : h.length > 1 && !this.props.disableKeyGeneration && (h = h.map((e, t) => e?.type && !e?.key ? {
 			...e,
 			key: e.key || t
 		} : e)));
-		let _ = { key: this.props.disableKeyGeneration ? void 0 : fn() };
+		let _ = { key: this.props.disableKeyGeneration ? void 0 : pn() };
 		u.forEach((e) => {
 			if (e.type === "JSXAttribute") {
-				let t = e.name.name, n = on[t] || t, i = this.#l(e, r);
+				let t = e.name.name, n = sn[t] || t, i = this.#l(e, r);
 				f.filter((e) => e.test(n)).length === 0 && (_[n] = i);
 			} else if (e.type === "JSXSpreadAttribute") {
 				let t = e.argument, n = this.#l(t, r);
 				typeof n == "object" && Object.keys(n || {}).forEach((e) => {
-					let t = on[e] || e;
+					let t = sn[e] || e;
 					f.filter((e) => e.test(t)).length === 0 && (_[t] = n[e]);
 				});
 			}
-		}), typeof _.style == "string" && (_.style = mn(_.style)), g && g.injectSourceInfo && (_.sourceInfo = this.#o(n));
+		}), typeof _.style == "string" && (_.style = hn(_.style)), g && g.injectSourceInfo && (_.sourceInfo = this.#o(n));
 		let ee = d.toLowerCase();
 		return ee === "option" && (h = h.props.children), e.createElement(g || ee, _, h);
 	};
@@ -7616,6 +7633,6 @@ var yn = 6, bn = class i extends e.Component {
 	};
 };
 //#endregion
-export { Gt as JsxParserError, bn as default };
+export { Gt as JsxParserError, xn as default };
 
 //# sourceMappingURL=react-jsx-parser.js.map
