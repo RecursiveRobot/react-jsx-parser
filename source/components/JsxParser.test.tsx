@@ -2663,5 +2663,163 @@ describe('JsxParser Component', () => {
 			// The throw came from the second (index 1) source item's iteration...
 			expect(error.sourceInfo.loopIndex).toBe(1)
 		})
+
+		test('reports (and swallows) a runtime error from a scope-local callback passed as a prop', () => {
+			const onError = vi.fn()
+			// `onClick` is a native closure constructed inside the block-bodied IIFE and passed to
+			// the element by reference — so it has no error handling of its own.
+			const jsx = `{
+				(() => {
+					const onClick = () => { throw new Error('Oh, no!') }
+					return <button onClick={onClick}>Click Me!</button>
+				})()
+			}`
+			const { component } = render(
+				<JsxParser blacklistedAttrs={[]} renderInWrapper={false} onError={onError} jsx={jsx} />,
+			)
+			// Nothing is reported on render — the handler has not run yet.
+			expect(onError).not.toHaveBeenCalled()
+
+			// Invoking the handler (as a click would) reports via onError and swallows the throw
+			// (returning undefined) rather than re-throwing, so it never surfaces as a React error.
+			expect(component.ParsedChildren[0].props.onClick()).toBeUndefined()
+
+			const error = onError.mock.calls[0][0]
+			expect(error).toBeInstanceOf(JsxParserError)
+			expect(error.type).toBe('function-runtime')
+			expect(error.cause).toBeInstanceOf(Error)
+			expect(error.cause.message).toBe('Oh, no!')
+			// The error is located at the attribute site, and its offsets round-trip against `jsx`.
+			expect(jsx.slice(error.sourceInfo.location.startOffset, error.sourceInfo.location.endOffset))
+				.toBe(error.sourceInfo.source)
+			expect(error.sourceInfo.source).toBe('onClick={onClick}')
+		})
+
+		test('reports a runtime error from a scope-local member-expression callback', () => {
+			const onError = vi.fn()
+			const jsx = `{
+				(() => {
+					const handlers = { click: () => { throw new Error('boom') } }
+					return <button onClick={handlers.click}>Click Me!</button>
+				})()
+			}`
+			const { component } = render(
+				<JsxParser blacklistedAttrs={[]} renderInWrapper={false} onError={onError} jsx={jsx} />,
+			)
+
+			expect(component.ParsedChildren[0].props.onClick()).toBeUndefined()
+
+			const error = onError.mock.calls[0][0]
+			expect(error.type).toBe('function-runtime')
+			expect(error.cause.message).toBe('boom')
+			expect(jsx.slice(error.sourceInfo.location.startOffset, error.sourceInfo.location.endOffset))
+				.toBe(error.sourceInfo.source)
+			expect(error.sourceInfo.source).toBe('onClick={handlers.click}')
+		})
+
+		test('captures the producing iteration index for a scope-local callback', () => {
+			const onError = vi.fn()
+			// Each iteration constructs its own `onClick`; the reported error must carry the index of
+			// the item that produced the handler, captured when the element was built (not at throw
+			// time, by which point the `.map()` iteration has unwound).
+			const jsx = `<ul>{items.map(item => {
+				const onClick = () => { throw new Error(item.name) }
+				return <li onClick={onClick}>{item.name}</li>
+			})}</ul>`
+			const { component } = render(
+				<JsxParser
+					blacklistedAttrs={[]}
+					renderInWrapper={false}
+					onError={onError}
+					bindings={{ items: [{ name: 'a' }, { name: 'b' }] }}
+					jsx={jsx}
+				/>,
+			)
+
+			const secondItem = component.ParsedChildren[0].props.children[1]
+			expect(secondItem.props.onClick()).toBeUndefined()
+
+			const error = onError.mock.calls[0][0]
+			expect(error.type).toBe('function-runtime')
+			expect(error.cause.message).toBe('b')
+			expect(error.sourceInfo.loopIndex).toBe(1)
+		})
+
+		test('swallows a scope-local callback error when no onError handler is provided', () => {
+			const jsx = `{
+				(() => {
+					const onClick = () => { throw new Error('Oh, no!') }
+					return <button onClick={onClick}>Click Me!</button>
+				})()
+			}`
+			const { component } = render(
+				<JsxParser blacklistedAttrs={[]} renderInWrapper={false} jsx={jsx} />,
+			)
+
+			// With no onError handler, the throw is still swallowed rather than surfacing.
+			expect(component.ParsedChildren[0].props.onClick()).toBeUndefined()
+		})
+
+		test('reports a runtime error from a scope-local optional-chained callback', () => {
+			const onError = vi.fn()
+			const jsx = `{
+				(() => {
+					const handlers = { click: () => { throw new Error('boom') } }
+					return <button onClick={handlers?.click}>Click Me!</button>
+				})()
+			}`
+			const { component } = render(
+				<JsxParser blacklistedAttrs={[]} renderInWrapper={false} onError={onError} jsx={jsx} />,
+			)
+
+			expect(component.ParsedChildren[0].props.onClick()).toBeUndefined()
+
+			const error = onError.mock.calls[0][0]
+			expect(error.type).toBe('function-runtime')
+			expect(error.sourceInfo.source).toBe('onClick={handlers?.click}')
+		})
+
+		test('reports a scope-local callback that throws a non-Error value', () => {
+			const onError = vi.fn()
+			// Handlers may throw a non-Error value; the reported message falls back to its string form.
+			const jsx = `{
+				(() => {
+					const onClick = () => { throw 'plain string failure' }
+					return <button onClick={onClick}>Click Me!</button>
+				})()
+			}`
+			const { component } = render(
+				<JsxParser blacklistedAttrs={[]} renderInWrapper={false} onError={onError} jsx={jsx} />,
+			)
+
+			expect(component.ParsedChildren[0].props.onClick()).toBeUndefined()
+
+			const error = onError.mock.calls[0][0]
+			expect(error.type).toBe('function-runtime')
+			expect(error.cause).toBe('plain string failure')
+			expect(error.message).toContain('plain string failure')
+		})
+
+		test('leaves a binding function referenced inside an arrow unwrapped (identity preserved)', () => {
+			const onError = vi.fn()
+			const globalHandler = () => { throw new Error('raw') }
+			// The handler comes from `bindings`, not the local closure, so it is passed through by
+			// reference: its identity is preserved and its throw is not converted into a reported
+			// JsxParserError.
+			const jsx = '{(() => <button onClick={globalHandler}>Click Me!</button>)()}'
+			const { component } = render(
+				<JsxParser
+					blacklistedAttrs={[]}
+					renderInWrapper={false}
+					onError={onError}
+					bindings={{ globalHandler }}
+					jsx={jsx}
+				/>,
+			)
+
+			expect(component.ParsedChildren[0].props.onClick).toBe(globalHandler)
+			expect(() => component.ParsedChildren[0].props.onClick()).toThrow('raw')
+			expect(onError).not.toHaveBeenCalled()
+		})
 	})
 })

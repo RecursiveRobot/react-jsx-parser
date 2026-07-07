@@ -105,6 +105,58 @@ export default class JsxParser extends React.Component<TProps> {
 		})
 	}
 
+	// Walks a reference expression (Identifier, MemberExpression, or optional chain) down to
+	// its root identifier name — e.g. `handlers.click` and `handlers?.click` both yield
+	// `handlers`.  Returns undefined for anything not rooted in a bare identifier.
+	#getRootIdentifierName = (node: AcornJSX.Expression | null | undefined): string | undefined => {
+		if (!node) return undefined
+		switch (node.type) {
+		case 'Identifier': return node.name
+		case 'MemberExpression': return this.#getRootIdentifierName(node.object as AcornJSX.Expression)
+		case 'ChainExpression': return this.#getRootIdentifierName(node.expression)
+		default: return undefined
+		}
+	}
+
+	// Wraps a function passed as an attribute that was resolved out of the local closure scope
+	// (i.e. constructed inside a block-bodied function rather than supplied via `bindings`).
+	// Such a function is a raw native closure with no error handling, so a throw at invocation
+	// time (e.g. a click handler firing) would otherwise escape the parser entirely.  The
+	// returned `Proxy` reports the throw to `onError` — located at the attribute site — and then
+	// swallows it (returning undefined): re-throwing would surface as a React error and bubble to
+	// an error boundary, halting the page.  Non-throwing calls pass through untouched.
+	#wrapScopedCallback = <T extends Function>(fn: T, attributeExpr: AcornJSX.JSXAttribute): T => {
+		// Capture the producing iteration index eagerly: the handler fires after any `.map()`
+		// iteration has unwound, so reading it at throw time would lose which item produced it.
+		const loopIndex = this.#currentLoopIndex()
+		// A wrapped callback only ever originates from a render-path element parser, which always
+		// inherits the consumer's original source, so `#userJsx` is reliably set here.
+		const source = this.#userJsx
+		const start = attributeExpr.start - this.#offsetDelta
+		const end = attributeExpr.end - this.#offsetDelta
+		const { fileName, onError } = this.props
+		return new Proxy(fn, {
+			apply: (target, thisArg, args) => {
+				try {
+					return Reflect.apply(target as Function, thisArg, args)
+				} catch (error: any) {
+					onError?.(buildErrorFromOffsets({
+						type: 'function-runtime',
+						message: error?.message ?? String(error),
+						source,
+						start,
+						end,
+						fileName,
+						cause: error,
+						astNode: attributeExpr,
+						loopIndex,
+					}))
+					return undefined
+				}
+			},
+		})
+	}
+
 	// Builds the `sourceInfo` injected into opted-in components, mapping the
 	// element's offsets onto the user's original (unwrapped) source.
 	#buildSourceInfo = (
@@ -562,7 +614,20 @@ export default class JsxParser extends React.Component<TProps> {
 					const rawName = expr.name.name
 					const attributeName = ATTRIBUTES[rawName] || rawName
 					// if the value is null, this is an implicitly "true" prop, such as readOnly
-					const value = this.#parseExpression(expr, scope)
+					let value = this.#parseExpression(expr, scope)
+
+					// A function resolved out of the local closure `scope` (constructed inside a
+					// block-bodied function rather than supplied via `bindings`) is a raw native
+					// closure with no error handling.  Wrap it so a throw at invocation time is
+					// reported via `onError` (and swallowed).  Functions from `bindings` resolve where
+					// `scope` is undefined, so they are left untouched (preserving prop identity).
+					const attributeExpression = expr.value?.type === 'JSXExpressionContainer'
+						? expr.value.expression
+						: undefined
+					const rootName = this.#getRootIdentifierName(attributeExpression)
+					if (typeof value === 'function' && rootName && scope && rootName in scope) {
+						value = this.#wrapScopedCallback(value, expr)
+					}
 
 					const matches = blacklistedAttrs.filter(re => re.test(attributeName))
 					if (matches.length === 0) {
