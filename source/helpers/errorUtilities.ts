@@ -7,6 +7,7 @@ export type JsxParserErrorType =
 	| 'unsupported-function' // Async/generator arrow functions are not supported
 	| 'function-parse' // A function body could not be transpiled
 	| 'function-runtime' // A block-bodied function threw at runtime
+	| 'invocation' // A CallExpression/NewExpression callee/constructor could not be resolved
 	| 'call' // A CallExpression threw while being invoked
 	| 'chain' // A ChainExpression threw while being resolved
 	| 'member-access' // A MemberExpression could not be resolved

@@ -12,6 +12,5 @@ createRoot(container).render(
 			<div className="foo">bar</div>
 		`}
 		onError={console.error}
-		showWarnings
 	/>,
 )

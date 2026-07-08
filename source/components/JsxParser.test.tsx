@@ -1400,8 +1400,23 @@ describe('JsxParser Component', () => {
 				expect(rendered.childNodes[0].textContent).toEqual(bindings.object['and'])
 				expect(component.ParsedChildren[0].props.foo).toEqual(bindings.object['and'])
 			})
-			test('does not raise error when navigating null or undefined members', () => {
+			test('reports non-optional navigation into null or undefined members', () => {
 				const expression = 'does.not.exist'
+				const jsx = `<span foo={${expression}}>{${expression}}</span>`
+				const onError = vi.fn()
+				const { rendered, component } = render(<JsxParser {...{ bindings, jsx, onError }} />)
+
+				expect(rendered.childNodes[0].textContent).toEqual('')
+				expect(component.ParsedChildren[0].props.foo).toEqual(undefined)
+
+				expect(onError).toBeCalled()
+				const error = onError.mock.calls[0][0]
+				expect(error.type).toEqual('member-access')
+				// `cause` names the exact source path that was null/undefined (used by the LSP).
+				expect(error.cause.message).toEqual('Cannot read `not` of `does`, which is undefined.')
+			})
+			test('optional chaining short-circuits null or undefined members without error', () => {
+				const expression = 'does?.not.exist'
 				const jsx = `<span foo={${expression}}>{${expression}}</span>`
 				const onError = vi.fn()
 				const { rendered, component } = render(<JsxParser {...{ bindings, jsx, onError }} />)
@@ -1523,7 +1538,7 @@ describe('JsxParser Component', () => {
 	describe('self-closing tags', () => {
 		test('by default, renders self-closing tags without their children', () => {
 			const { rendered } = render(
-				<JsxParser showWarnings jsx='<img src="/foo.png"><div class="invalidChild"></div></img>' />,
+				<JsxParser jsx='<img src="/foo.png"><div class="invalidChild"></div></img>' />,
 			)
 
 			expect(rendered.childNodes).toHaveLength(1)
@@ -1811,14 +1826,38 @@ describe('JsxParser Component', () => {
 			expect(html).toMatch(new Date().getFullYear().toString())
 		})
 
-		it('handles null constructor calls gracefully', () => {
+		it('reports an unresolved constructor call via onError', () => {
+			const onError = vi.fn()
 			const { html } = render(
 				<JsxParser
 					components={{ Custom }}
 					jsx="<Custom>{new DoesNotExist()}</Custom>"
+					onError={onError}
 				/>,
 			)
 			expect(html).toMatch('')
+			expect(onError).toBeCalled()
+			const error = onError.mock.calls[0][0]
+			expect(error.type).toEqual('invocation')
+			expect(error.cause).toBeInstanceOf(TypeError)
+			expect(error.cause.message).toEqual('`DoesNotExist` is not a constructor.')
+		})
+
+		it('reports an unresolved function call via onError', () => {
+			const onError = vi.fn()
+			const { html } = render(
+				<JsxParser
+					components={{ Custom }}
+					jsx="<Custom>{doesNotExist()}</Custom>"
+					onError={onError}
+				/>,
+			)
+			expect(html).toMatch('')
+			expect(onError).toBeCalled()
+			const error = onError.mock.calls[0][0]
+			expect(error.type).toEqual('invocation')
+			expect(error.cause).toBeInstanceOf(TypeError)
+			expect(error.cause.message).toEqual('`doesNotExist` is not a function.')
 		})
 
 		it('supports nested arrow functions', () => {
