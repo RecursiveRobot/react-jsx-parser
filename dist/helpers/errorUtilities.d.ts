@@ -1,5 +1,5 @@
 import * as AcornJSX from 'acorn-jsx';
-export type JsxParserErrorType = 'parse' | 'unsupported-function' | 'function-parse' | 'function-runtime' | 'call' | 'chain' | 'member-access' | 'blacklisted-tag' | 'unrecognized-component' | 'unrecognized-tag';
+export type JsxParserErrorType = 'parse' | 'unsupported-function' | 'function-parse' | 'function-runtime' | 'invocation' | 'call' | 'chain' | 'member-access' | 'blacklisted-tag' | 'unrecognized-component' | 'unrecognized-tag';
 export interface SourceLocation {
     line: number;
     column?: number;

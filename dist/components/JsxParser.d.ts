@@ -16,7 +16,6 @@ export type TProps = {
     fileName?: string;
     jsx?: string;
     onError?: (error: JsxParserError) => void;
-    showWarnings?: boolean;
     renderError?: (props: {
         error: string;
     }) => React.JSX.Element | null;
