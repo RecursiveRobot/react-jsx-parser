@@ -5,6 +5,8 @@ import React from 'react'
 import { render as rtlRender, fireEvent } from '@testing-library/react'
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { vi } from 'vitest'
+// eslint-disable-next-line import/no-extraneous-dependencies
+import * as Acorn from 'acorn'
 import JsxParser from './JsxParser'
 import { JsxParserError } from '../helpers/errorUtilities'
 
@@ -2859,6 +2861,129 @@ describe('JsxParser Component', () => {
 			expect(component.ParsedChildren[0].props.onClick).toBe(globalHandler)
 			expect(() => component.ParsedChildren[0].props.onClick()).toThrow('raw')
 			expect(onError).not.toHaveBeenCalled()
+		})
+	})
+
+	describe('parse caching', () => {
+		// Every top-level parse in `#parseJSX` first builds a parser via `Acorn.Parser.extend(...)`;
+		// on a cache hit that call is skipped. For simple JSX (no block-bodied arrows, which re-parse
+		// their own bodies) the `extend` call count therefore equals the number of top-level parses.
+		let extendSpy
+		beforeEach(() => {
+			extendSpy = vi.spyOn(Acorn.Parser, 'extend')
+		})
+		afterEach(() => {
+			extendSpy.mockRestore()
+		})
+
+		test('reuses the parsed AST across an inert re-render', () => {
+			const jsx = '<div><p>Hello</p></div>'
+			const { rerender } = rtlRender(<JsxParser jsx={jsx} />, { container: parent })
+			const afterMount = extendSpy.mock.calls.length
+			expect(afterMount).toBeGreaterThan(0)
+
+			// Same jsx, an unrelated prop added — the parse must be reused.
+			rerender(<JsxParser jsx={jsx} someProp />)
+			expect(extendSpy.mock.calls.length).toBe(afterMount)
+		})
+
+		test('reuses the AST when a fresh but content-equal jsx string is passed', () => {
+			const { rerender } = rtlRender(
+				<JsxParser jsx="<div><p>Hello</p></div>" />,
+				{ container: parent },
+			)
+			const afterMount = extendSpy.mock.calls.length
+
+			// A brand-new string instance with identical content (as if rebuilt each render). Keying
+			// compares by value, so this still hits the cache and does not re-parse.
+			rerender(<JsxParser jsx={['<div>', '<p>Hello</p>', '</div>'].join('')} />)
+			expect(extendSpy.mock.calls.length).toBe(afterMount)
+		})
+
+		test('re-parses when the jsx changes', () => {
+			const { rerender } = rtlRender(
+				<JsxParser jsx="<div><p>Hello</p></div>" />,
+				{ container: parent },
+			)
+			const afterMount = extendSpy.mock.calls.length
+
+			rerender(<JsxParser jsx="<div><p>Goodbye</p></div>" />)
+			expect(extendSpy.mock.calls.length).toBe(afterMount + 1)
+		})
+
+		test('re-parses when autoCloseVoidElements toggles', () => {
+			const jsx = '<div><p>Hello</p></div>'
+			const { rerender } = rtlRender(
+				<JsxParser autoCloseVoidElements={false} jsx={jsx} />,
+				{ container: parent },
+			)
+			const afterMount = extendSpy.mock.calls.length
+
+			// The flag is part of the cache key — the same jsx must re-parse when it flips.
+			rerender(<JsxParser autoCloseVoidElements jsx={jsx} />)
+			expect(extendSpy.mock.calls.length).toBe(afterMount + 1)
+		})
+
+		test('re-walks (without re-parsing) when only bindings change', () => {
+			const jsx = '<input type="checkbox" checked={isChecked} />'
+			const { rerender } = rtlRender(
+				<JsxParser bindings={{ isChecked: true }} jsx={jsx} />,
+				{ container: parent },
+			)
+			const afterMount = extendSpy.mock.calls.length
+			expect(parent.querySelector('input').checked).toBe(true)
+
+			rerender(<JsxParser bindings={{ isChecked: false }} jsx={jsx} />)
+			// No re-parse...
+			expect(extendSpy.mock.calls.length).toBe(afterMount)
+			// ...but the walk still ran, so the output reflects the new binding.
+			expect(parent.querySelector('input').checked).toBe(false)
+		})
+
+		test('re-runs the walk (fresh keys) on a cache hit', () => {
+			const ref = React.createRef()
+			const jsx = '<div><p>Hello</p></div>'
+			const { rerender } = rtlRender(<JsxParser ref={ref} jsx={jsx} />, { container: parent })
+			const firstKey = ref.current.ParsedChildren[0].key
+			const afterMount = extendSpy.mock.calls.length
+
+			rerender(<JsxParser ref={ref} jsx={jsx} someProp />)
+			// No re-parse...
+			expect(extendSpy.mock.calls.length).toBe(afterMount)
+			// ...but the walk re-ran, minting a fresh random key for the element.
+			expect(firstKey).toBeTruthy()
+			expect(ref.current.ParsedChildren[0].key).not.toBe(firstKey)
+		})
+
+		test('does not cache parse failures', () => {
+			const onError = vi.fn()
+			const jsx = '<div><p>unclosed'
+			const { rerender } = rtlRender(
+				<JsxParser jsx={jsx} onError={onError} />,
+				{ container: parent },
+			)
+			expect(onError).toHaveBeenCalledTimes(1)
+
+			// A cached failure would suppress `onError` on later renders; it must fire again.
+			rerender(<JsxParser jsx={jsx} onError={onError} someProp />)
+			expect(onError).toHaveBeenCalledTimes(2)
+		})
+
+		test('keeps sourceInfo.astNode identity stable across inert re-renders', () => {
+			const OptedIn: any = ({ text }) => <div>{text}</div>
+			OptedIn.injectSourceInfo = true
+			const ref = React.createRef()
+			const jsx = '<OptedIn text="Hi" />'
+			const { rerender } = rtlRender(
+				<JsxParser ref={ref} components={{ OptedIn }} jsx={jsx} />,
+				{ container: parent },
+			)
+			const first = ref.current.ParsedChildren[0].props.sourceInfo.astNode
+
+			rerender(<JsxParser ref={ref} components={{ OptedIn }} jsx={jsx} someProp />)
+			const second = ref.current.ParsedChildren[0].props.sourceInfo.astNode
+			// The cached AST hands out the same (read-only) node instance across inert re-renders.
+			expect(second).toBe(first)
 		})
 	})
 })

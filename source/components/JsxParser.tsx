@@ -74,6 +74,23 @@ export default class JsxParser extends React.Component<TProps> {
 	// Shared by reference with the per-element parsers spawned for block-bodied functions.
 	#loopIndexStack: number[] = []
 
+	// Single-entry memo of the last successful top-level parse.  The Acorn AST depends ONLY on the
+	// raw `jsx` prop and `autoCloseVoidElements`, so it can be reused across renders that change
+	// only bindings/scope/other props — the walk (`#parseExpression`) still runs every render.
+	// Read-only: the parser never mutates AST nodes, so sharing the same node instances across
+	// renders is safe.  GC'd with the component — no eviction needed.
+	//
+	// Keyed on the RAW `props.jsx` reference (compared with `===`) plus `autoCloseVoidElements`,
+	// rather than a rebuilt composite string: for a large `jsx` a stable prop reference makes the
+	// hit check O(1) (pointer short-circuit) with no per-render allocation or full-string scan.
+	// The derived processed/wrapped strings are cached too, so a hit restores `#userJsx`/`this.jsx`
+	// by reference (no re-`trim`/`replace`, no re-wrap) — see `#parseJSX`.
+	#cachedAst: AcornJSX.Expression[] | null = null
+	#cachedJsxProp: string | undefined = undefined
+	#cachedAutoClose: boolean | undefined = undefined
+	#cachedWrappedJsx: string = ''
+	#cachedProcessedJsx: string = ''
+
 	#getRawTextForExpression: (expression: AcornJSX.Expression) => string =
 		(e: AcornJSX.Expression) => this.jsx.slice(e.start, e.end)
 
@@ -203,38 +220,69 @@ export default class JsxParser extends React.Component<TProps> {
 		loopIndex: this.#currentLoopIndex(),
 	})
 
-	#parseJSX = (jsx: string): React.JSX.Element | React.JSX.Element[] | null => {
-		const parser = Acorn.Parser.extend(AcornJSX.default({
-			autoCloseVoidElements: this.props.autoCloseVoidElements,
-		}))
-		const wrappedJsx = `<root>${jsx}</root>`
-		this.jsx = wrappedJsx
-		this.#userJsx = jsx
+	#parseJSX = (): React.JSX.Element | React.JSX.Element[] | null => {
+		const rawJsx = this.props.jsx
+		const autoClose = this.props.autoCloseVoidElements
+
+		// Constant/empty every render (even on a hit): the walk reads these for offset math and
+		// loop-index tracking. Cheap, so shared by both branches below.
 		this.#offsetDelta = ROOT_PREFIX_LENGTH
 		this.#loopIndexStack = []
-		let parsed: AcornJSX.Expression[] = []
-		try {
-			// @ts-ignore - AcornJsx doesn't have typescript typings
-			parsed = parser.parse(wrappedJsx, { ecmaVersion: 'latest' })
-			// @ts-ignore - AcornJsx doesn't have typescript typings
-			parsed = parsed.body[0].expression.children || []
-			return parsed.map(p => this.#parseExpression(p)).filter(Boolean)
-		} catch (error: any) {
-			// Acorn SyntaxErrors expose `.pos`; map it onto the user's source.
-			const pos = typeof error?.pos === 'number' ? error.pos - this.#offsetDelta : 0
-			const structuredError = buildErrorFromOffsets({
-				type: 'parse',
-				message: sanitizeHtml(String(error)),
-				source: jsx,
-				start: pos,
-				end: pos,
-				fileName: this.props.fileName,
-				cause: error,
-			})
-			if (this.props.onError) this.props.onError(structuredError)
-			if (this.props.renderError) return this.props.renderError({ error: String(structuredError) })
-			return null
+
+		let parsed: AcornJSX.Expression[]
+		if (
+			this.#cachedAst
+			// `===` on the raw prop: O(1) when the consumer passes a stable reference (the norm for a
+			// large template); an O(n) memcmp — but no allocation — when a fresh, content-equal string
+			// is passed, which still hits. `autoCloseVoidElements` is the only other parse input.
+			&& this.#cachedJsxProp === rawJsx
+			&& this.#cachedAutoClose === autoClose
+		) {
+			// Hit: reuse the cached derivations (reference assignments — no re-trim/replace, no re-wrap,
+			// no full-string scan beyond the key compare above).
+			this.jsx = this.#cachedWrappedJsx
+			this.#userJsx = this.#cachedProcessedJsx
+			parsed = this.#cachedAst
+		} else {
+			const jsx = (rawJsx || '').trim().replace(/<!DOCTYPE([^>]*)>/g, '')
+			const wrappedJsx = `<root>${jsx}</root>`
+			this.jsx = wrappedJsx
+			this.#userJsx = jsx
+			try {
+				const parser = Acorn.Parser.extend(AcornJSX.default({
+					autoCloseVoidElements: autoClose,
+				}))
+				// @ts-ignore - AcornJsx doesn't have typescript typings
+				const root = parser.parse(wrappedJsx, { ecmaVersion: 'latest' })
+				// @ts-ignore - AcornJsx doesn't have typescript typings
+				parsed = root.body[0].expression.children || []
+			} catch (error: any) {
+				// Only the parse throws Acorn SyntaxErrors (which expose `.pos`); the walk self-reports
+				// its own failures via `#buildError`/`onError`, so it stays outside this catch. Parse
+				// failures are not cached: the `onError`/`renderError` side effects must fire every
+				// render, and leaving the cache fields untouched lets a later fix produce a fresh miss.
+				const pos = typeof error?.pos === 'number' ? error.pos - this.#offsetDelta : 0
+				const structuredError = buildErrorFromOffsets({
+					type: 'parse',
+					message: sanitizeHtml(String(error)),
+					source: jsx,
+					start: pos,
+					end: pos,
+					fileName: this.props.fileName,
+					cause: error,
+				})
+				if (this.props.onError) this.props.onError(structuredError)
+				if (this.props.renderError) return this.props.renderError({ error: String(structuredError) })
+				return null
+			}
+			this.#cachedAst = parsed
+			this.#cachedJsxProp = rawJsx
+			this.#cachedAutoClose = autoClose
+			this.#cachedWrappedJsx = wrappedJsx
+			this.#cachedProcessedJsx = jsx
 		}
+
+		return parsed.map(p => this.#parseExpression(p)).filter(Boolean)
 	}
 
 	#parseExpression = (expression: AcornJSX.Expression, scope?: Scope): any => {
@@ -739,9 +787,9 @@ export default class JsxParser extends React.Component<TProps> {
 	}
 
 	render = (): React.JSX.Element => {
-		const jsx = (this.props.jsx || '').trim().replace(/<!DOCTYPE([^>]*)>/g, '')
-
-		this.ParsedChildren = this.#parseJSX(jsx)
+		// `#parseJSX` reads `this.props.jsx` directly and does its own preprocessing (skipped on a
+		// cache hit), so the (potentially large) source is not re-trimmed/wrapped on every render.
+		this.ParsedChildren = this.#parseJSX()
 		const className = [...new Set(['jsx-parser', ...String(this.props.className).split(' ')])]
 			.filter(Boolean)
 			.join(' ')
