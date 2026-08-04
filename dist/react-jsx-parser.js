@@ -7360,13 +7360,18 @@ var bn = 6, xn = class i extends e.Component {
 	#e = "";
 	#t = 0;
 	#n = [];
-	#r = (e) => this.jsx.slice(e.start, e.end);
-	#i = (e) => {
-		let t = this.#r(e).replaceAll("`", "\\`");
+	#r = null;
+	#i = void 0;
+	#a = void 0;
+	#o = "";
+	#s = "";
+	#c = (e) => this.jsx.slice(e.start, e.end);
+	#l = (e) => {
+		let t = this.#c(e).replaceAll("`", "\\`");
 		return t.length > 50 ? `${t.slice(0, 47)}...` : t;
 	};
-	#a = () => this.#n.length ? this.#n[this.#n.length - 1] : void 0;
-	#o = (e) => {
+	#u = () => this.#n.length ? this.#n[this.#n.length - 1] : void 0;
+	#d = (e) => {
 		let t = 0;
 		return new Proxy(e, { apply: (e, n, r) => {
 			let i = t;
@@ -7378,16 +7383,16 @@ var bn = 6, xn = class i extends e.Component {
 			}
 		} });
 	};
-	#s = (e) => {
+	#f = (e) => {
 		if (e) switch (e.type) {
 			case "Identifier": return e.name;
-			case "MemberExpression": return this.#s(e.object);
-			case "ChainExpression": return this.#s(e.expression);
+			case "MemberExpression": return this.#f(e.object);
+			case "ChainExpression": return this.#f(e.expression);
 			default: return;
 		}
 	};
-	#c = (e, t) => {
-		let n = this.#a(), r = this.#e, i = t.start - this.#t, a = t.end - this.#t, { fileName: o, onError: s } = this.props;
+	#p = (e, t) => {
+		let n = this.#u(), r = this.#e, i = t.start - this.#t, a = t.end - this.#t, { fileName: o, onError: s } = this.props;
 		return new Proxy(e, { apply: (e, c, l) => {
 			try {
 				return Reflect.apply(e, c, l);
@@ -7407,14 +7412,14 @@ var bn = 6, xn = class i extends e.Component {
 			}
 		} });
 	};
-	#l = (e) => ({
+	#m = (e) => ({
 		fileName: this.props.fileName,
-		source: this.#r(e),
+		source: this.#c(e),
 		location: Yt(this.#e || this.jsx, e.start - this.#t, e.end - this.#t),
-		loopIndex: this.#a(),
+		loopIndex: this.#u(),
 		astNode: e
 	});
-	#u = (e, t, n, r) => Xt({
+	#h = (e, t, n, r) => Xt({
 		type: e,
 		message: t,
 		source: this.#e || this.jsx,
@@ -7423,33 +7428,40 @@ var bn = 6, xn = class i extends e.Component {
 		fileName: this.props.fileName,
 		cause: r,
 		astNode: n,
-		loopIndex: this.#a()
+		loopIndex: this.#u()
 	});
-	#d = (e) => {
-		let t = I.extend(Wt.default({ autoCloseVoidElements: this.props.autoCloseVoidElements })), n = `<root>${e}</root>`;
-		this.jsx = n, this.#e = e, this.#t = bn, this.#n = [];
-		let r = [];
-		try {
-			return r = t.parse(n, { ecmaVersion: "latest" }), r = r.body[0].expression.children || [], r.map((e) => this.#f(e)).filter(Boolean);
-		} catch (t) {
-			let n = typeof t?.pos == "number" ? t.pos - this.#t : 0, r = Xt({
-				type: "parse",
-				message: Qt(String(t)),
-				source: e,
-				start: n,
-				end: n,
-				fileName: this.props.fileName,
-				cause: t
-			});
-			return this.props.onError && this.props.onError(r), this.props.renderError ? this.props.renderError({ error: String(r) }) : null;
+	#g = () => {
+		let e = this.props.jsx, t = this.props.autoCloseVoidElements;
+		this.#t = bn, this.#n = [];
+		let n;
+		if (this.#r && this.#i === e && this.#a === t) this.jsx = this.#o, this.#e = this.#s, n = this.#r;
+		else {
+			let r = (e || "").trim().replace(/<!DOCTYPE([^>]*)>/g, ""), i = `<root>${r}</root>`;
+			this.jsx = i, this.#e = r;
+			try {
+				n = I.extend(Wt.default({ autoCloseVoidElements: t })).parse(i, { ecmaVersion: "latest" }).body[0].expression.children || [];
+			} catch (e) {
+				let t = typeof e?.pos == "number" ? e.pos - this.#t : 0, n = Xt({
+					type: "parse",
+					message: Qt(String(e)),
+					source: r,
+					start: t,
+					end: t,
+					fileName: this.props.fileName,
+					cause: e
+				});
+				return this.props.onError && this.props.onError(n), this.props.renderError ? this.props.renderError({ error: String(n) }) : null;
+			}
+			this.#r = n, this.#i = e, this.#a = t, this.#o = i, this.#s = r;
 		}
+		return n.map((e) => this.#_(e)).filter(Boolean);
 	};
-	#f = (e, n) => {
+	#_ = (e, n) => {
 		switch (e.type) {
-			case "JSXAttribute": return e.value === null ? !0 : (this.lastAttributeName = e.name.name, this.#f(e.value, n));
+			case "JSXAttribute": return e.value === null ? !0 : (this.lastAttributeName = e.name.name, this.#_(e.value, n));
 			case "JSXElement":
-			case "JSXFragment": return this.lastAttributeName = void 0, this.#h(e, n);
-			case "JSXExpressionContainer": return this.#f(e.expression, n);
+			case "JSXFragment": return this.lastAttributeName = void 0, this.#b(e, n);
+			case "JSXExpressionContainer": return this.#_(e.expression, n);
 			case "JSXText":
 				let a = this.props.disableKeyGeneration ? void 0 : pn();
 				return this.props.disableFragments ? e.value : /* @__PURE__ */ r(t, { children: e.value }, a);
@@ -7457,137 +7469,137 @@ var bn = 6, xn = class i extends e.Component {
 				let o = [];
 				return (e.elements || []).forEach((e) => {
 					if ($t(e)) {
-						let t = this.#f(e.argument, n);
+						let t = this.#_(e.argument, n);
 						t && o.push(...t);
 						return;
 					}
-					let t = this.#f(e, n);
+					let t = this.#_(e, n);
 					t !== void 0 && o.push(t);
 				}), o;
 			case "ArrowFunctionExpression":
-				if ((e.async || e.generator) && this.props.onError?.(this.#u("unsupported-function", "Async and generator arrow functions are not supported.", e, /* @__PURE__ */ SyntaxError("Async and generator arrow functions are not supported."))), e.body.type === "BlockStatement") {
+				if ((e.async || e.generator) && this.props.onError?.(this.#h("unsupported-function", "Async and generator arrow functions are not supported.", e, /* @__PURE__ */ SyntaxError("Async and generator arrow functions are not supported."))), e.body.type === "BlockStatement") {
 					let t = e.params.map((e, t) => {
 						switch (e.type) {
 							case "Identifier": return e.name;
 							case "RestElement": return `...${e.argument.name}`;
 							default: return `arg_${t}`;
 						}
-					}), r = e.params.some((e) => e.type !== "Identifier"), a = r ? `{ return (${this.#r(e)})(${t.join(", ")}); }` : this.#r(e.body), o = this.#t, s = r ? (t) => e.start + (t - 10) - o : (t) => e.body.start + t - o;
+					}), r = e.params.some((e) => e.type !== "Identifier"), a = r ? `{ return (${this.#c(e)})(${t.join(", ")}); }` : this.#c(e.body), o = this.#t, s = r ? (t) => e.start + (t - 10) - o : (t) => e.body.start + t - o;
 					try {
 						let [e, r] = an(a, {
 							...this.props.bindings,
 							...n
 						}, (e, t, n, r = 0) => {
 							let a = new i(this.props);
-							return a.jsx = e, a.#e = this.#e, a.#t = -r, a.#n = this.#n, a.#f(t, n);
+							return a.jsx = e, a.#e = this.#e, a.#t = -r, a.#n = this.#n, a.#_(t, n);
 						}, s);
-						return this.#o(yn(on(t, e, this.lastAttributeName, this.props.onError, this.props.fileName, s, this.#e || this.jsx), {
+						return this.#d(yn(on(t, e, this.lastAttributeName, this.props.onError, this.props.fileName, s, this.#e || this.jsx), {
 							...this.props.bindings,
 							...n,
 							...r
 						}));
 					} catch (t) {
-						this.props.onError?.(this.#u("function-parse", `Unable to parse function \`${this.lastAttributeName ?? this.#i(e)}\` => ${t}.`, e, t));
+						this.props.onError?.(this.#h("function-parse", `Unable to parse function \`${this.lastAttributeName ?? this.#l(e)}\` => ${t}.`, e, t));
 						return;
 					}
 				}
-				return this.#o((...t) => {
-					let r = this.#g(n, e, t);
-					return this.#f(e.body, r);
+				return this.#d((...t) => {
+					let r = this.#x(n, e, t);
+					return this.#_(e.body, r);
 				});
 			case "BinaryExpression":
 				switch (e.operator) {
-					case "-": return this.#f(e.left, n) - this.#f(e.right, n);
-					case "!=": return this.#f(e.left, n) != this.#f(e.right, n);
-					case "!==": return this.#f(e.left, n) !== this.#f(e.right, n);
-					case "*": return this.#f(e.left, n) * this.#f(e.right, n);
-					case "**": return this.#f(e.left, n) ** this.#f(e.right, n);
-					case "/": return this.#f(e.left, n) / this.#f(e.right, n);
-					case "%": return this.#f(e.left, n) % this.#f(e.right, n);
-					case "+": return this.#f(e.left, n) + this.#f(e.right, n);
-					case "<": return this.#f(e.left, n) < this.#f(e.right, n);
-					case "<=": return this.#f(e.left, n) <= this.#f(e.right, n);
-					case "==": return this.#f(e.left, n) == this.#f(e.right, n);
-					case "===": return this.#f(e.left, n) === this.#f(e.right, n);
-					case ">": return this.#f(e.left, n) > this.#f(e.right, n);
-					case ">=": return this.#f(e.left, n) >= this.#f(e.right, n);
+					case "-": return this.#_(e.left, n) - this.#_(e.right, n);
+					case "!=": return this.#_(e.left, n) != this.#_(e.right, n);
+					case "!==": return this.#_(e.left, n) !== this.#_(e.right, n);
+					case "*": return this.#_(e.left, n) * this.#_(e.right, n);
+					case "**": return this.#_(e.left, n) ** this.#_(e.right, n);
+					case "/": return this.#_(e.left, n) / this.#_(e.right, n);
+					case "%": return this.#_(e.left, n) % this.#_(e.right, n);
+					case "+": return this.#_(e.left, n) + this.#_(e.right, n);
+					case "<": return this.#_(e.left, n) < this.#_(e.right, n);
+					case "<=": return this.#_(e.left, n) <= this.#_(e.right, n);
+					case "==": return this.#_(e.left, n) == this.#_(e.right, n);
+					case "===": return this.#_(e.left, n) === this.#_(e.right, n);
+					case ">": return this.#_(e.left, n) > this.#_(e.right, n);
+					case ">=": return this.#_(e.left, n) >= this.#_(e.right, n);
 				}
 				return;
 			case "CallExpression":
-				let s = this.#f(e.callee, n);
+				let s = this.#_(e.callee, n);
 				if (s === void 0) {
-					this.props.onError?.(this.#u("invocation", `The expression \`${this.#i(e)}\` could not be resolved, resulting in an undefined return value.`, e, /* @__PURE__ */ TypeError(`\`${this.#i(e.callee)}\` is not a function.`)));
+					this.props.onError?.(this.#h("invocation", `The expression \`${this.#l(e)}\` could not be resolved, resulting in an undefined return value.`, e, /* @__PURE__ */ TypeError(`\`${this.#l(e.callee)}\` is not a function.`)));
 					return;
 				}
 				try {
-					let t = e.arguments.map((e) => this.#f(e, n)), r = {
+					let t = e.arguments.map((e) => this.#_(e, n)), r = {
 						...this.props.bindings,
 						...n
 					};
 					return Reflect.apply(s, r, t);
 				} catch (t) {
-					this.props.onError?.(this.#u("call", `Unable to call expression \`${this.#i(e)}\` => ${t}.`, e, t));
+					this.props.onError?.(this.#h("call", `Unable to call expression \`${this.#l(e)}\` => ${t}.`, e, t));
 					return;
 				}
 			case "ChainExpression": try {
-				return this.#f(e.expression, n);
+				return this.#_(e.expression, n);
 			} catch (t) {
-				this.props.onError?.(this.#u("chain", `Unable to call expression \`${this.#i(e)}\` => ${t}.`, e, t));
+				this.props.onError?.(this.#h("chain", `Unable to call expression \`${this.#l(e)}\` => ${t}.`, e, t));
 				return;
 			}
-			case "ConditionalExpression": return this.#f(e.test, n) ? this.#f(e.consequent, n) : this.#f(e.alternate, n);
-			case "ExpressionStatement": return this.#f(e.expression, n);
+			case "ConditionalExpression": return this.#_(e.test, n) ? this.#_(e.consequent, n) : this.#_(e.alternate, n);
+			case "ExpressionStatement": return this.#_(e.expression, n);
 			case "Identifier": return n?.[e.name] ?? this.props.bindings?.[e.name] ?? window[e.name];
 			case "Literal": return e.value;
 			case "LogicalExpression":
-				let c = this.#f(e.left, n), l = () => this.#f(e.right, n);
+				let c = this.#_(e.left, n), l = () => this.#_(e.right, n);
 				switch (e.operator) {
 					case "||": return c || l();
 					case "&&": return c && l();
 					case "??": return c ?? l();
 					default: return !1;
 				}
-			case "MemberExpression": return this.#p(e, n);
+			case "MemberExpression": return this.#v(e, n);
 			case "NewExpression":
-				let u = this.#f(e.callee, n);
+				let u = this.#_(e.callee, n);
 				if (u === void 0) {
-					this.props.onError?.(this.#u("invocation", `The expression \`${this.#i(e)}\` could not be resolved, resulting in an undefined return value.`, e, /* @__PURE__ */ TypeError(`\`${this.#i(e.callee)}\` is not a constructor.`)));
+					this.props.onError?.(this.#h("invocation", `The expression \`${this.#l(e)}\` could not be resolved, resulting in an undefined return value.`, e, /* @__PURE__ */ TypeError(`\`${this.#l(e.callee)}\` is not a constructor.`)));
 					return;
 				}
-				return new u(...e.arguments.map((e) => this.#f(e, n)));
+				return new u(...e.arguments.map((e) => this.#_(e, n)));
 			case "ObjectExpression":
 				let d = {};
 				return e.properties.forEach((e) => {
 					if ($t(e)) {
-						let t = this.#f(e.argument, n);
+						let t = this.#_(e.argument, n);
 						Object.entries(t || {}).forEach(([e, t]) => {
 							d[e] = t;
 						});
 					} else {
 						let t = e.key.name || e.key.value;
-						d[t] = this.#f(e.value, n);
+						d[t] = this.#_(e.value, n);
 					}
 				}), d;
 			case "TemplateElement": return e.value.cooked;
-			case "TemplateLiteral": return [...e.expressions, ...e.quasis].sort((e, t) => e.start < t.start ? -1 : 1).map((e) => this.#f(e, n)).join("");
+			case "TemplateLiteral": return [...e.expressions, ...e.quasis].sort((e, t) => e.start < t.start ? -1 : 1).map((e) => this.#_(e, n)).join("");
 			case "ThisExpression": return this.props.bindings;
 			case "UnaryExpression":
 				switch (e.operator) {
-					case "+": return +this.#f(e.argument, n);
-					case "-": return -this.#f(e.argument, n);
-					case "!": return !this.#f(e.argument, n);
+					case "+": return +this.#_(e.argument, n);
+					case "-": return -this.#_(e.argument, n);
+					case "!": return !this.#_(e.argument, n);
 				}
 				return;
 		}
 	};
-	#p = (e, t) => {
+	#v = (e, t) => {
 		let { object: n } = e, r = (e) => ({
-			key: e.computed ? this.#f(e.property, t) : e.property?.name ?? JSON.parse(e.property?.raw ?? "\"\""),
+			key: e.computed ? this.#_(e.property, t) : e.property?.name ?? JSON.parse(e.property?.raw ?? "\"\""),
 			optional: !!e.optional,
 			object: e.object
 		}), i = [r(e)];
 		if (e.object.type !== "Literal") for (; n && ["MemberExpression", "Literal"].includes(n?.type);) i.unshift(r(n)), n = n.object;
-		let a = this.#f(n, t);
+		let a = this.#_(n, t);
 		try {
 			let e = a, t = !1, n = i.reduce((n, r) => {
 				if (!t) {
@@ -7596,48 +7608,48 @@ var bn = 6, xn = class i extends e.Component {
 							t = !0;
 							return;
 						}
-						throw TypeError(`Cannot read \`${r.key}\` of \`${this.#i(r.object)}\`, which is ${n === null ? "null" : "undefined"}.`);
+						throw TypeError(`Cannot read \`${r.key}\` of \`${this.#l(r.object)}\`, which is ${n === null ? "null" : "undefined"}.`);
 					}
 					return n[r.key];
 				}
 			}, a);
 			return typeof n == "function" ? n.bind(e) : n;
 		} catch (t) {
-			this.props.onError?.(this.#u("member-access", `Unable to resolve \`${this.#i(e)}\` => ${t}`, e, t));
+			this.props.onError?.(this.#h("member-access", `Unable to resolve \`${this.#l(e)}\` => ${t}`, e, t));
 		}
 	};
-	#m = (e) => e.type === "JSXIdentifier" ? e.name : `${this.#m(e.object)}.${this.#m(e.property)}`;
-	#h = (n, r) => {
-		let { allowUnknownElements: i, components: a, componentsOnly: o, onError: s } = this.props, { children: c = [] } = n, l = n.type === "JSXElement" ? n.openingElement : n.openingFragment, { attributes: u = [] } = l, d = n.type === "JSXElement" ? this.#m(l.name) : "", f = (this.props.blacklistedAttrs || []).map((e) => e instanceof RegExp ? e : new RegExp(e, "i")), p = (this.props.blacklistedTags || []).map((e) => e.trim().toLowerCase()).filter(Boolean);
-		if (/^(html|head|body)$/i.test(d)) return c.map((e) => this.#h(e, r));
+	#y = (e) => e.type === "JSXIdentifier" ? e.name : `${this.#y(e.object)}.${this.#y(e.property)}`;
+	#b = (n, r) => {
+		let { allowUnknownElements: i, components: a, componentsOnly: o, onError: s } = this.props, { children: c = [] } = n, l = n.type === "JSXElement" ? n.openingElement : n.openingFragment, { attributes: u = [] } = l, d = n.type === "JSXElement" ? this.#y(l.name) : "", f = (this.props.blacklistedAttrs || []).map((e) => e instanceof RegExp ? e : new RegExp(e, "i")), p = (this.props.blacklistedTags || []).map((e) => e.trim().toLowerCase()).filter(Boolean);
+		if (/^(html|head|body)$/i.test(d)) return c.map((e) => this.#b(e, r));
 		let m = d.trim().toLowerCase();
-		if (p.indexOf(m) !== -1) return s(this.#u("blacklisted-tag", `The tag \`<${d}>\` is blacklisted, and will not be rendered.`, n, /* @__PURE__ */ Error(`The tag <${d}> is blacklisted.`))), null;
+		if (p.indexOf(m) !== -1) return s(this.#h("blacklisted-tag", `The tag \`<${d}>\` is blacklisted, and will not be rendered.`, n, /* @__PURE__ */ Error(`The tag <${d}> is blacklisted.`))), null;
 		if (d !== "" && !vn(a, d)) {
-			if (o) return s(this.#u("unrecognized-component", `The component \`<${d}>\` is unrecognized, and will not be rendered.`, n, /* @__PURE__ */ ReferenceError(`The component <${d}> is not defined.`))), this.props.renderUnrecognized(d);
-			if (!i && document.createElement(d) instanceof HTMLUnknownElement) return s(this.#u("unrecognized-tag", `The tag \`<${d}>\` is unrecognized in this browser, and will not be rendered.`, n, /* @__PURE__ */ ReferenceError(`The tag <${d}> is not a recognized element.`))), this.props.renderUnrecognized(d);
+			if (o) return s(this.#h("unrecognized-component", `The component \`<${d}>\` is unrecognized, and will not be rendered.`, n, /* @__PURE__ */ ReferenceError(`The component <${d}> is not defined.`))), this.props.renderUnrecognized(d);
+			if (!i && document.createElement(d) instanceof HTMLUnknownElement) return s(this.#h("unrecognized-tag", `The tag \`<${d}>\` is unrecognized in this browser, and will not be rendered.`, n, /* @__PURE__ */ ReferenceError(`The tag <${d}> is not a recognized element.`))), this.props.renderUnrecognized(d);
 		}
 		let h, g = n.type === "JSXElement" ? vn(a, d) : t;
-		(g || un(d)) && (h = c.map((e) => this.#f(e, r)), !g && !dn(d) && (h = h.filter((e) => typeof e != "string" || !/^\s*$/.test(e))), h.length === 0 ? h = void 0 : h.length === 1 ? [h] = h : h.length > 1 && !this.props.disableKeyGeneration && (h = h.map((e, t) => e?.type && !e?.key ? {
+		(g || un(d)) && (h = c.map((e) => this.#_(e, r)), !g && !dn(d) && (h = h.filter((e) => typeof e != "string" || !/^\s*$/.test(e))), h.length === 0 ? h = void 0 : h.length === 1 ? [h] = h : h.length > 1 && !this.props.disableKeyGeneration && (h = h.map((e, t) => e?.type && !e?.key ? {
 			...e,
 			key: e.key || t
 		} : e)));
 		let _ = { key: this.props.disableKeyGeneration ? void 0 : pn() };
 		u.forEach((e) => {
 			if (e.type === "JSXAttribute") {
-				let t = e.name.name, n = sn[t] || t, i = this.#f(e, r), a = e.value?.type === "JSXExpressionContainer" ? e.value.expression : void 0, o = this.#s(a);
-				typeof i == "function" && o && r && o in r && (i = this.#c(i, e)), f.filter((e) => e.test(n)).length === 0 && (_[n] = i);
+				let t = e.name.name, n = sn[t] || t, i = this.#_(e, r), a = e.value?.type === "JSXExpressionContainer" ? e.value.expression : void 0, o = this.#f(a);
+				typeof i == "function" && o && r && o in r && (i = this.#p(i, e)), f.filter((e) => e.test(n)).length === 0 && (_[n] = i);
 			} else if (e.type === "JSXSpreadAttribute") {
-				let t = e.argument, n = this.#f(t, r);
+				let t = e.argument, n = this.#_(t, r);
 				typeof n == "object" && Object.keys(n || {}).forEach((e) => {
 					let t = sn[e] || e;
 					f.filter((e) => e.test(t)).length === 0 && (_[t] = n[e]);
 				});
 			}
-		}), typeof _.style == "string" && (_.style = hn(_.style)), g && g.injectSourceInfo && (_.sourceInfo = this.#l(n));
+		}), typeof _.style == "string" && (_.style = hn(_.style)), g && g.injectSourceInfo && (_.sourceInfo = this.#m(n));
 		let ee = d.toLowerCase();
 		return ee === "option" && (h = h.props.children), e.createElement(g || ee, _, h);
 	};
-	#g = (e, t, n) => {
+	#x = (e, t, n) => {
 		let r = e ?? {};
 		return t.params.forEach((t, i) => {
 			switch (t.type) {
@@ -7655,7 +7667,7 @@ var bn = 6, xn = class i extends e.Component {
 					});
 					break;
 				case "AssignmentPattern":
-					let a = () => this.#f(t.right, e);
+					let a = () => this.#_(t.right, e);
 					r[t.left.name] = n[i] === void 0 ? a() : n[i];
 					break;
 				case "RestElement":
@@ -7665,11 +7677,10 @@ var bn = 6, xn = class i extends e.Component {
 		}), r;
 	};
 	render = () => {
-		let e = (this.props.jsx || "").trim().replace(/<!DOCTYPE([^>]*)>/g, "");
-		this.ParsedChildren = this.#d(e);
-		let t = [.../* @__PURE__ */ new Set(["jsx-parser", ...String(this.props.className).split(" ")])].filter(Boolean).join(" ");
+		this.ParsedChildren = this.#g();
+		let e = [.../* @__PURE__ */ new Set(["jsx-parser", ...String(this.props.className).split(" ")])].filter(Boolean).join(" ");
 		return this.props.renderInWrapper ? /* @__PURE__ */ r("div", {
-			className: t,
+			className: e,
 			children: this.ParsedChildren
 		}) : /* @__PURE__ */ r(n, { children: this.ParsedChildren });
 	};
