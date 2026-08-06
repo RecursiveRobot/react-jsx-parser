@@ -3132,5 +3132,97 @@ describe('JsxParser Component', () => {
 			expect(renderBatches[1].renderId).toBeGreaterThan(renderBatches[0].renderId)
 			expect(renderBatches[1].cycleId).not.toBe(renderBatches[0].cycleId)
 		})
+
+		describe('React component render timing (profileReactRender)', () => {
+			const Leaf = ({ label }) => <span>{label}</span>
+			const Box = ({ children }) => <div>{children}</div>
+			// `React.Profiler.onRender` fires during commit; the parser flushes a 'react' batch on a
+			// microtask, so tests await a macrotask turn before asserting.
+			const flush = () => new Promise(resolve => { setTimeout(resolve, 0) })
+
+			test('emits no react batch when profileReactRender is off', async () => {
+				const onProfile = vi.fn()
+				render(<JsxParser jsx="<Leaf label='hi' />" components={{ Leaf }} onProfile={onProfile} />)
+				await flush()
+				expect(batches(onProfile).filter(b => b.trigger === 'react')).toHaveLength(0)
+				// Parser profiling still works.
+				expect(batches(onProfile).filter(b => b.trigger === 'render')).toHaveLength(1)
+			})
+
+			test('emits no react batch for host-only templates', async () => {
+				const onProfile = vi.fn()
+				render(<JsxParser jsx="<div><span>hi</span></div>" onProfile={onProfile} profileReactRender />)
+				await flush()
+				expect(batches(onProfile).filter(b => b.trigger === 'react')).toHaveLength(0)
+			})
+
+			test('emits one react batch per commit, a node per component, joined by cycleId', async () => {
+				const onProfile = vi.fn()
+				render(
+					<JsxParser
+						jsx="<Leaf label='a' /><Leaf label='b' />"
+						components={{ Leaf }}
+						onProfile={onProfile}
+						profileReactRender
+					/>,
+				)
+				await flush()
+
+				const all = batches(onProfile)
+				const renderBatch = all.find(b => b.trigger === 'render')
+				const reactBatches = all.filter(b => b.trigger === 'react')
+				expect(reactBatches).toHaveLength(1)
+				const [batch] = reactBatches
+				expect(batch.cycleId).toBe(renderBatch.cycleId)
+				expect(batch.renderId).not.toBe(renderBatch.renderId)
+				expect(batch.nodes).toHaveLength(2)
+				batch.nodes.forEach(node => {
+					expect(node.componentName).toBe('Leaf')
+					expect(node.nodeType).toBe('Leaf')
+					expect(node.phase).toBe('mount')
+					expect(node.totalTime).toBeGreaterThanOrEqual(0)
+					expect(node.baseDuration).toBeGreaterThanOrEqual(0)
+				})
+			})
+
+			test('reconstructs nesting and exclusive self-time for nested components', async () => {
+				const onProfile = vi.fn()
+				render(
+					<JsxParser jsx="<Box><Leaf label='x' /></Box>" components={{ Box, Leaf }} onProfile={onProfile} profileReactRender />,
+				)
+				await flush()
+
+				const [batch] = batches(onProfile).filter(b => b.trigger === 'react')
+				const box = batch.nodes.find(n => n.componentName === 'Box')
+				const leaf = batch.nodes.find(n => n.componentName === 'Leaf')
+				expect(box.parentId).toBeNull()
+				expect(leaf.parentId).toBe(box.id)
+				expect(leaf.depth).toBe(box.depth + 1)
+				// React's actualDuration is inclusive; self = total − children total.
+				expect(box.totalTime).toBeGreaterThanOrEqual(leaf.totalTime)
+				expect(box.selfTime).toBe(box.totalTime - leaf.totalTime)
+			})
+
+			test('tags looped component instances with distinct ids and incrementing loopIndex', async () => {
+				const onProfile = vi.fn()
+				render(
+					<JsxParser
+						jsx="<ul>{items.map(i => <Leaf label={i} />)}</ul>"
+						components={{ Leaf }}
+						bindings={{ items: ['a', 'b', 'c'] }}
+						onProfile={onProfile}
+						profileReactRender
+					/>,
+				)
+				await flush()
+
+				const [batch] = batches(onProfile).filter(b => b.trigger === 'react')
+				expect(batch.nodes).toHaveLength(3)
+				expect(new Set(batch.nodes.map(n => n.id)).size).toBe(3)
+				// Siblings under a host <ul>: none parented to another Leaf.
+				batch.nodes.forEach(n => expect(n.parentId).toBeNull())
+				expect(batch.nodes.map(n => n.loopIndex).sort()).toEqual([0, 1, 2])
+			})
+		})
 	})
 })

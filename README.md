@@ -139,6 +139,8 @@ JsxParser.defaultProps = {
 
   onProfile: undefined, // if specified, enables per-node render profiling - see "Profiling" below
 
+  profileReactRender: false, // if true (with onProfile), also profiles React's per-component render - see "Profiling"
+
   renderError: undefined, // if specified, this function can be used to render errors as a fallback
 
   renderInWrapper: true, // if false, the HTML output will have no <div> wrapper
@@ -169,8 +171,8 @@ interface ProfileData {
   fileName?: string
   cycleId: string          // shared by every batch from one React render pass - the join key
   renderId: number         // monotonic per batch (the main walk + each callback)
-  trigger: 'render' | 'callback'
-  totalTime: number        // ms for this batch's synchronous walk
+  trigger: 'render' | 'callback' | 'react'
+  totalTime: number        // ms for this batch's synchronous walk ('react': summed root render time)
   nodes: ProfilerNodeTiming[]  // post-order
   callback?: {             // present only when trigger === 'callback'
     location: SourceLocation // the render-prop/function-child's position in your source
@@ -189,9 +191,32 @@ interface ProfilerNodeTiming {
   selfTime: number         // ms exclusive (this node minus its children)
   totalTime: number        // ms inclusive (node + subtree)
   loopIndex: number | undefined // the .map()/iteration index that produced this node
+  // Present only on trigger: 'react' nodes:
+  phase?: 'mount' | 'update' | 'nested-update' // the React commit phase
+  baseDuration?: number    // React's estimated no-memoization render time (ms)
+  componentName?: string   // the component's display name (also mirrored into nodeType)
 }
 ```
 
 `ProfileData` and `ProfilerNodeTiming` are exported from the package. See `source/demo.tsx` for a
 worked drill-down visualizer (a sortable tree table with source-range highlighting).
+
+### Profiling React component render times
+
+The batches above measure how long the **parser** takes to evaluate the template and build elements.
+To also measure how long **React itself** takes to render the produced components, set
+`profileReactRender` (in addition to `onProfile`). Each resolved **custom component** (not host tags
+like `<div>`) is wrapped in a transparent [`React.Profiler`](https://react.dev/reference/react/Profiler),
+and its commit-phase timings are delivered as an extra batch with `trigger: 'react'`, sharing the
+render's `cycleId`. Each node carries React's `phase`, inclusive `totalTime` (React's
+`actualDuration`), exclusive `selfTime`, and `baseDuration`.
+
+Two caveats:
+- **Dev / profiling builds only.** `React.Profiler` reports nothing in a plain production React
+  build; use a development or `react-dom/profiling` build. React-render profiling is a diagnostic aid.
+- **Opt-in because it modifies the tree.** Wrapping components in `Profiler` changes the element
+  tree, so it is off by default and gated behind `profileReactRender` — using `onProfile` alone never
+  changes what is rendered. `'react'` batches arrive on a microtask after commit (later than the
+  synchronous `'render'`/`'callback'` batches of the same `cycleId`), and a lazily-invoked
+  render-prop's components appear as roots of their own `'react'` batch.
 

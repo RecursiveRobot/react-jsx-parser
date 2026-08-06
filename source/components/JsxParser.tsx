@@ -3,8 +3,8 @@ import * as Acorn from 'acorn'
 import * as AcornJSX from 'acorn-jsx'
 import React, { Fragment, ComponentType, ExoticComponent } from 'react'
 import { transpileFunctionBody, isSpreadElement, constructFunction } from '../helpers/functionUtilities'
-import { JsxParserError, SourceInfo, buildErrorFromOffsets, getLocationFromOffsets, sanitizeHtml } from '../helpers/errorUtilities'
-import { ProfileData, ProfilerSession } from '../helpers/profilerUtilities'
+import { JsxParserError, SourceInfo, SourceLocation, buildErrorFromOffsets, getLocationFromOffsets, sanitizeHtml } from '../helpers/errorUtilities'
+import { ProfileData, ProfilerNodeTiming, ProfilerSession } from '../helpers/profilerUtilities'
 import ATTRIBUTES from '../constants/attributeNames'
 import { canHaveChildren, canHaveWhitespace } from '../constants/specialTags'
 import { randomHash } from '../helpers/hash'
@@ -29,11 +29,31 @@ export type TProps = {
 	jsx?: string,
 	onError?: (error: JsxParserError) => void,
 	onProfile?: (data: ProfileData) => void,
+	profileReactRender?: boolean,
 	renderError?: (props: { error: string }) => React.JSX.Element | null,
 	renderInWrapper?: boolean,
 	renderUnrecognized?: (tagName: string) => React.JSX.Element | null,
 }
 type Scope = Record<string, any>
+
+// Captured when a profiled custom component's element is built, carried in that component's
+// `React.Profiler` onRender closure, and combined with the commit-phase timings on flush.
+// `instanceId`/`parentInstanceId` reconstruct exact per-instance React nesting (see `#parseElement`).
+type ReactProfileMeta = {
+	cycleId: string
+	instanceId: number
+	parentInstanceId: number | null
+	componentName: string
+	source: string
+	location: SourceLocation
+	loopIndex: number | undefined
+}
+type ReactProfileEntry = {
+	meta: ReactProfileMeta
+	phase: 'mount' | 'update' | 'nested-update'
+	actualDuration: number
+	baseDuration: number
+}
 
 // The JSX is parsed wrapped in `<root>...</root>`; this prefix length is used to
 // map AST/Acorn offsets back onto the user's original (unwrapped) source.
@@ -57,6 +77,7 @@ export default class JsxParser extends React.Component<TProps> {
 		jsx: '',
 		onError: () => { },
 		onProfile: undefined,
+		profileReactRender: false,
 		renderError: undefined,
 		renderInWrapper: true,
 		renderUnrecognized: () => null,
@@ -104,6 +125,17 @@ export default class JsxParser extends React.Component<TProps> {
 	#profileCycleId: string = ''
 	#profileInstanceHash: string = randomHash()
 	#profileSeq: number = 0
+
+	// React-render profiling state (active only when `onProfile` is set AND `profileReactRender` is
+	// true).  `#reactProfilingOn` is the per-render decision read on the hot path in `#parseElement`.
+	// `#reactParentStack`/`#reactInstanceSeq` reconstruct React nesting during construction (reset per
+	// render, like `#loopIndexStack`).  `#reactBuffer` accumulates each commit's `onRender` calls; a
+	// single `queueMicrotask` flush (`#reactFlushScheduled`) delivers them as one `'react'` batch.
+	#reactProfilingOn: boolean = false
+	#reactParentStack: number[] = []
+	#reactInstanceSeq: number = 0
+	#reactBuffer: ReactProfileEntry[] = []
+	#reactFlushScheduled: boolean = false
 
 	// Reassignable dispatch target for the AST walk.  Pointed once per render (in `#parseJSX`) — and
 	// per sub-parser in the block-body share block — at either `#evaluateExpression` (profiling off:
@@ -314,6 +346,10 @@ export default class JsxParser extends React.Component<TProps> {
 		// loop-index tracking. Cheap, so shared by both branches below.
 		this.#offsetDelta = ROOT_PREFIX_LENGTH
 		this.#loopIndexStack = []
+		// React-nesting bookkeeping is per render; resetting here bounds any imbalance (e.g. a throw
+		// mid-walk) to a single render, exactly like `#loopIndexStack` above.
+		this.#reactParentStack = []
+		this.#reactInstanceSeq = 0
 
 		let parsed: AcornJSX.Expression[]
 		if (
@@ -378,6 +414,9 @@ export default class JsxParser extends React.Component<TProps> {
 			this.#profileCycleId = `${new Date().toISOString()}-${this.#profileInstanceHash}-${this.#profileSeq}`
 			this.#parseExpression = this.#profileExpression
 			this.#trackIteration = this.#profileIterationIndex
+			// React-render profiling is a distinct opt-in on top of parser profiling: it modifies the
+			// element tree (Profiler wrappers) and only reports under a dev/profiling React build.
+			this.#reactProfilingOn = this.props.profileReactRender === true
 			this.#profiler.begin()
 			const start = this.#profiler.now()
 			const result = parsed.map(p => this.#parseExpression(p)).filter(Boolean)
@@ -395,9 +434,99 @@ export default class JsxParser extends React.Component<TProps> {
 		}
 
 		this.#profiler = null
+		this.#reactProfilingOn = false
 		this.#parseExpression = this.#evaluateExpression
 		this.#trackIteration = this.#trackIterationIndex
 		return parsed.map(p => this.#parseExpression(p)).filter(Boolean)
+	}
+
+	// Records one custom component's React commit timing (from its `React.Profiler.onRender`) and
+	// schedules a single microtask flush.  Every `onRender` for a commit fires synchronously, so the
+	// microtask sees the complete set; `#flushReactProfile` then emits one `'react'` batch.
+	#collectReactTiming = (
+		meta: ReactProfileMeta,
+		phase: 'mount' | 'update' | 'nested-update',
+		actualDuration: number,
+		baseDuration: number,
+	): void => {
+		this.#reactBuffer.push({ meta, phase, actualDuration, baseDuration })
+		if (!this.#reactFlushScheduled) {
+			this.#reactFlushScheduled = true
+			queueMicrotask(() => this.#flushReactProfile())
+		}
+	}
+
+	// Flushes the buffered React commit timings as `'react'` batches (one per `cycleId`; normally a
+	// single cycle per commit, grouped defensively).  Reconstructs the per-instance tree from the
+	// captured `instanceId`/`parentInstanceId`, derives `depth` and exclusive `selfTime` (React's
+	// `actualDuration` is inclusive of nested Profilers), and joins to the render via `cycleId`.
+	#flushReactProfile = (): void => {
+		const buffer = this.#reactBuffer
+		this.#reactBuffer = []
+		this.#reactFlushScheduled = false
+		const { onProfile } = this.props
+		if (!onProfile || !buffer.length || !this.#profiler) return
+
+		const byCycle = new Map<string, ReactProfileEntry[]>()
+		buffer.forEach(entry => {
+			const group = byCycle.get(entry.meta.cycleId)
+			if (group) group.push(entry)
+			else byCycle.set(entry.meta.cycleId, [entry])
+		})
+
+		byCycle.forEach((entries, cycleId) => {
+			const actualById = new Map<number, number>()
+			const parentById = new Map<number, number | null>()
+			entries.forEach(e => {
+				actualById.set(e.meta.instanceId, e.actualDuration)
+				parentById.set(e.meta.instanceId, e.meta.parentInstanceId)
+			})
+			// Direct-children inclusive time per instance, for exclusive `selfTime`.
+			const childTotalById = new Map<number, number>()
+			entries.forEach(e => {
+				const parent = e.meta.parentInstanceId
+				if (parent !== null && actualById.has(parent)) {
+					childTotalById.set(parent, (childTotalById.get(parent) ?? 0) + e.actualDuration)
+				}
+			})
+			const depthOf = (instanceId: number): number => {
+				let depth = 0
+				let current = parentById.get(instanceId) ?? null
+				while (current !== null && actualById.has(current)) {
+					depth += 1
+					current = parentById.get(current) ?? null
+				}
+				return depth
+			}
+			const nodes: ProfilerNodeTiming[] = entries.map(({ meta, phase, actualDuration, baseDuration }) => ({
+				id: meta.instanceId,
+				// A parent outside this batch (e.g. lazily-invoked subtree) surfaces as a root.
+				parentId: meta.parentInstanceId !== null && actualById.has(meta.parentInstanceId)
+					? meta.parentInstanceId
+					: null,
+				depth: depthOf(meta.instanceId),
+				nodeType: meta.componentName,
+				source: meta.source,
+				location: meta.location,
+				selfTime: actualDuration - (childTotalById.get(meta.instanceId) ?? 0),
+				totalTime: actualDuration,
+				loopIndex: meta.loopIndex,
+				phase,
+				baseDuration,
+				componentName: meta.componentName,
+			}))
+			const totalTime = nodes
+				.filter(n => n.parentId === null)
+				.reduce((sum, n) => sum + n.totalTime, 0)
+			onProfile({
+				fileName: this.props.fileName,
+				cycleId,
+				renderId: this.#profiler!.nextRenderId(),
+				trigger: 'react',
+				totalTime,
+				nodes,
+			})
+		})
 	}
 
 	// Times a single node's evaluation and records it against the active profiling batch, then
@@ -521,6 +650,11 @@ export default class JsxParser extends React.Component<TProps> {
 							elementParser.#trackIteration = this.#profiler
 								? elementParser.#profileIterationIndex
 								: elementParser.#trackIterationIndex
+							// Share React-render enablement + the cycle join key so components rendered by this
+							// block-bodied callback are wrapped and tagged with the same cycle.  The sub-parser
+							// keeps its own react parent-stack/buffer and flushes its own `'react'` batch.
+							elementParser.#reactProfilingOn = this.#reactProfilingOn
+							elementParser.#profileCycleId = this.#profileCycleId
 							return elementParser.#parseExpression(elementExpression, elementScope)
 						},
 						mapBodyOffsetToSource,
@@ -810,6 +944,25 @@ export default class JsxParser extends React.Component<TProps> {
 			? resolvePath(components, name)
 			: Fragment
 
+		// React-render profiling wraps only resolved custom components (host tags have a falsy
+		// `component`; `Fragment` is excluded).  Allocate this component's instance id and read its
+		// enclosing profiled component *before* parsing children, so nested components pick this up as
+		// their parent — reconstructing exact React nesting even across `.map()`-looped instances.
+		const isProfiledComponent = this.#reactProfilingOn
+			&& element.type === 'JSXElement'
+			&& !!component
+			&& component !== Fragment
+		let reactInstanceId = -1
+		let reactParentInstanceId: number | null = null
+		if (isProfiledComponent) {
+			reactInstanceId = this.#reactInstanceSeq
+			this.#reactInstanceSeq += 1
+			reactParentInstanceId = this.#reactParentStack.length
+				? this.#reactParentStack[this.#reactParentStack.length - 1]
+				: null
+			this.#reactParentStack.push(reactInstanceId)
+		}
+
 		if (component || canHaveChildren(name)) {
 			children = childNodes.map(node => this.#parseExpression(node, scope))
 			if (!component && !canHaveWhitespace(name)) {
@@ -830,6 +983,9 @@ export default class JsxParser extends React.Component<TProps> {
 				))
 			}
 		}
+
+		// Children are built; this component is no longer the enclosing parent for what follows.
+		if (isProfiledComponent) this.#reactParentStack.pop()
 
 		const props: { [key: string]: any } = {
 			key: this.props.disableKeyGeneration ? undefined : randomHash(),
@@ -892,7 +1048,36 @@ export default class JsxParser extends React.Component<TProps> {
 			children = children.props.children
 		}
 
-		return React.createElement(component || lowerName, props, children)
+		const rendered = React.createElement(component || lowerName, props, children)
+		if (!isProfiledComponent) return rendered
+
+		// Wrap the component in a transparent `React.Profiler` (no DOM node).  The Profiler carries the
+		// `key`, so list reconciliation and the multi-child key pass above keep working.  Its onRender
+		// closure captures this component's `meta`; commit-phase timings are collected + flushed as a
+		// `'react'` batch.  `element` is the AST node — its offsets map to the user's source.
+		const resolvedComponent = component as { displayName?: string, name?: string }
+		const meta: ReactProfileMeta = {
+			cycleId: this.#profileCycleId,
+			instanceId: reactInstanceId,
+			parentInstanceId: reactParentInstanceId,
+			componentName: resolvedComponent.displayName || resolvedComponent.name || name,
+			source: this.#getRawTextForExpression(element),
+			location: getLocationFromOffsets(
+				this.#userJsx || this.jsx,
+				element.start - this.#offsetDelta,
+				element.end - this.#offsetDelta,
+			),
+			loopIndex: this.#currentLoopIndex(),
+		}
+		const onRender = (
+			_id: string,
+			phase: 'mount' | 'update' | 'nested-update',
+			actualDuration: number,
+			baseDuration: number,
+		): void => {
+			this.#collectReactTiming(meta, phase, actualDuration, baseDuration)
+		}
+		return React.createElement(React.Profiler, { id: meta.componentName, key: props.key, onRender }, rendered)
 	}
 
 	#getFunctionScope = (

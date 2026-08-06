@@ -1,4 +1,5 @@
 /* eslint-disable no-console, react/require-default-props, react/no-array-index-key */
+/* eslint-disable jsx-a11y/label-has-associated-control */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import JsxParser, { ProfileData, ProfilerNodeTiming } from './index'
@@ -34,6 +35,11 @@ const TEMPLATE = `<div className="report">
 const DATA_A = [{ name: 'Alpha', score: 3 }, { name: 'Beta', score: 7 }, { name: 'Gamma', score: 1 }]
 const DATA_B = [{ name: 'Delta', score: 9 }, { name: 'Epsilon', score: 2 }]
 
+// Memoized so publishing profile state (below) re-renders the panel without re-rendering the parser
+// — otherwise each publish would trigger a fresh profiled render and loop forever.  Re-renders only
+// when its own props (data-derived `bindings`, `profileReactRender`) actually change.
+const ProfiledParser = React.memo(JsxParser)
+
 const ms = (n: number) => `${n.toFixed(3)}ms`
 const truncate = (s: string, n = 48) => (s.length > n ? `${s.slice(0, n - 1)}…` : s).replace(/\s+/g, ' ')
 
@@ -62,7 +68,7 @@ function NodeTable({ nodes, onSelect, selected }: {
 						self {sortBySelf ? '▼' : '·'}
 					</th>
 					<th style={th}>total</th>
-					<th style={th}>loop</th>
+					<th style={th}>loop/phase</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -76,7 +82,7 @@ function NodeTable({ nodes, onSelect, selected }: {
 						<td style={td}>{truncate(node.source)}</td>
 						<td style={td}>{ms(node.selfTime)}</td>
 						<td style={td}>{ms(node.totalTime)}</td>
-						<td style={td}>{node.loopIndex ?? '—'}</td>
+						<td style={td}>{node.phase ?? node.loopIndex ?? '—'}</td>
 					</tr>
 				))}
 			</tbody>
@@ -86,31 +92,36 @@ function NodeTable({ nodes, onSelect, selected }: {
 
 function Demo() {
 	const [data, setData] = useState(DATA_A)
+	const [profileReact, setProfileReact] = useState(true)
 	const [cycle, setCycle] = useState<ProfileData[]>([])
 	const [selected, setSelected] = useState<ProfilerNodeTiming | null>(null)
-	// `onProfile` fires during JsxParser's render phase, so batches are buffered here (mutating a
-	// ref, not setState) and published after commit by the effect below — one entry per cycleId.
+	// `onProfile` fires during the render phase ('render'/'callback') and again on a microtask after
+	// commit ('react').  Batches are buffered by cycleId in a ref (never setState during render) and
+	// published on a microtask.  Publishing re-renders this panel but not `ProfiledParser` (memoized),
+	// so it cannot loop back into another profiled render.
 	const pending = useRef<ProfileData[]>([])
+	const publishScheduled = useRef(false)
 
 	const bindings = useMemo(() => ({ title: 'Render profile demo', items: data }), [data])
 	const components = useMemo(() => ({ Cards }), [])
 	const handleProfile = useCallback((batch: ProfileData) => {
 		if (pending.current.length && pending.current[0].cycleId !== batch.cycleId) pending.current = []
 		pending.current.push(batch)
+		if (!publishScheduled.current) {
+			publishScheduled.current = true
+			queueMicrotask(() => {
+				publishScheduled.current = false
+				setCycle(pending.current.slice())
+			})
+		}
 	}, [])
 
-	// Publish the buffered cycle after each data change.  Gated on `data` (not every render) so the
-	// state update it makes cannot loop back into another profiled render.
-	useEffect(() => {
-		if (pending.current.length) {
-			setCycle(pending.current.slice())
-			setSelected(null)
-			pending.current = []
-		}
-	}, [data])
+	// Clear the highlighted node when the profiled inputs change (its offsets belong to a prior cycle).
+	useEffect(() => setSelected(null), [data, profileReact])
 
 	const renderBatch = cycle.find(b => b.trigger === 'render')
 	const callbackBatches = cycle.filter(b => b.trigger === 'callback')
+	const reactBatches = cycle.filter(b => b.trigger === 'react')
 
 	const highlight = (source: string) => {
 		if (!selected || selected.location.startOffset === undefined || selected.location.endOffset === undefined) {
@@ -133,16 +144,21 @@ function Demo() {
 				<strong>react-jsx-parser · render profiler</strong>
 				<button type="button" onClick={() => setData(DATA_A)}>Data A ({DATA_A.length})</button>
 				<button type="button" onClick={() => setData(DATA_B)}>Data B ({DATA_B.length})</button>
+				<label style={{ fontSize: 13 }}>
+					<input type="checkbox" checked={profileReact} onChange={e => setProfileReact(e.target.checked)} />
+					{' '}profile React render (dev build only)
+				</label>
 				{renderBatch && <span style={{ color: '#666' }}>cycle {renderBatch.cycleId}</span>}
 			</div>
 
 			<div style={panel}>
 				<h3 style={{ marginTop: 0 }}>Rendered output</h3>
-				<JsxParser
+				<ProfiledParser
 					jsx={TEMPLATE}
 					bindings={bindings}
 					components={components}
 					onProfile={handleProfile}
+					profileReactRender={profileReact}
 					onError={console.error}
 				/>
 				<h3>Template source</h3>
@@ -165,6 +181,13 @@ function Demo() {
 						<div style={{ fontFamily: 'monospace', fontSize: 12, color: '#555' }}>
 							{truncate(batch.callback?.source ?? '')} · loop {batch.callback?.loopIndex ?? '—'} · {ms(batch.totalTime)}
 						</div>
+						<NodeTable nodes={batch.nodes} onSelect={setSelected} selected={selected} />
+					</div>
+				))}
+
+				{reactBatches.map(batch => (
+					<div key={batch.renderId} style={{ marginBottom: 12 }}>
+						<h3>React render · {ms(batch.totalTime)} · {batch.nodes.length} components</h3>
 						<NodeTable nodes={batch.nodes} onSelect={setSelected} selected={selected} />
 					</div>
 				))}

@@ -24,14 +24,23 @@ export interface ProfilerNodeTiming {
 	/// The source-item index of the `.map()`/iteration that produced this node
 	/// (`undefined` when none is active) — see `#trackIterationIndex`.
 	loopIndex: number | undefined
+	/// React commit phase for the node — present only on `trigger: 'react'` nodes, whose
+	/// timings come from `React.Profiler.onRender` rather than the parser walk.
+	phase?: 'mount' | 'update' | 'nested-update'
+	/// React's estimated no-memoization render time for the subtree (ms) — `trigger: 'react'` only.
+	baseDuration?: number
+	/// The component's display name — `trigger: 'react'` only (also mirrored into `nodeType`).
+	componentName?: string
 }
 
 /// One delivery to the consumer's `onProfile` callback.  The main synchronous walk
 /// emits one batch (`trigger: 'render'`); each lazily-invoked render-producing
 /// callback (a render-prop / function-child a host component calls after the walk
-/// returns) emits its own batch (`trigger: 'callback'`).  Every batch from the same
-/// React render pass shares a `cycleId`, so callback batches can be joined back to
-/// the render that produced them.
+/// returns) emits its own batch (`trigger: 'callback'`).  When `profileReactRender` is
+/// enabled, React's own commit-phase timings for the produced custom components are
+/// delivered as a `trigger: 'react'` batch (built from `React.Profiler.onRender`).
+/// Every batch from the same React render pass shares a `cycleId`, so callback and
+/// react batches can be joined back to the render that produced them.
 export interface ProfileData {
 	/// The `fileName` prop, when supplied.
 	fileName?: string
@@ -39,9 +48,11 @@ export interface ProfileData {
 	cycleId: string
 	/// Monotonic per-batch id (increments for the main pass and each callback).
 	renderId: number
-	/// Whether this batch is the main synchronous walk or a lazy callback invocation.
-	trigger: 'render' | 'callback'
-	/// Milliseconds for this batch's synchronous walk.
+	/// Whether this batch is the main synchronous walk (`'render'`), a lazy callback
+	/// invocation (`'callback'`), or React's commit-phase component timings (`'react'`).
+	trigger: 'render' | 'callback' | 'react'
+	/// Milliseconds for this batch: the synchronous walk for `'render'`/`'callback'`, or the
+	/// summed inclusive React render time of the root components for `'react'`.
 	totalTime: number
 	/// The node timings, in post-order.
 	nodes: ProfilerNodeTiming[]
@@ -95,10 +106,17 @@ export class ProfilerSession {
 		return this.#now()
 	}
 
+	/// Bumps and returns the shared monotonic batch id.  Used by `begin()` for walk batches and
+	/// directly for `'react'` batches (which do not open a walk) so all batch ids stay unique.
+	nextRenderId(): number {
+		this.#renderId += 1
+		return this.#renderId
+	}
+
 	/// Opens a batch: bumps `renderId`, resets the frame stack and id counter, and
 	/// allocates a fresh `nodes` array (leaving any previously delivered batch intact).
 	begin(): void {
-		this.#renderId += 1
+		this.nextRenderId()
 		this.#nodes = []
 		this.#stack = []
 		this.#idCounter = 0
