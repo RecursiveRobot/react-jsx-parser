@@ -137,6 +137,8 @@ JsxParser.defaultProps = {
 
   onError: () => {}, // if specified, any rendering errors are reported via this method
 
+  onProfile: undefined, // if specified, enables per-node render profiling - see "Profiling" below
+
   renderError: undefined, // if specified, this function can be used to render errors as a fallback
 
   renderInWrapper: true, // if false, the HTML output will have no <div> wrapper
@@ -144,4 +146,52 @@ JsxParser.defaultProps = {
   renderUnrecognized: tagName => null, // unrecognized tags are rendered via this method
 }
 ```
+
+## Profiling
+
+Supplying an `onProfile` callback turns on **opt-in render profiling** (presence-based, like
+`onError`). It records the time spent evaluating and building each AST node — expressions,
+elements, attributes, children — keyed by their position in your source, so you can find which
+part of a template is expensive. When `onProfile` is omitted the standard render path is
+completely unaffected (no timers, no allocations).
+
+`onProfile` is called **once per synchronous walk**, plus **once more for each lazily-invoked
+render-producing callback** — a render-prop or function-as-children that a host component invokes
+after the parser's own walk has returned (e.g. `<List renderRow={row => <b>{row}</b>} />`).
+Callbacks that build no elements (a plain event handler doing `setState`) emit nothing.
+
+Every batch produced by the same React render pass shares a `cycleId`, so the main walk and its
+lazy callbacks can be joined back together. `cycleId` (shared per render cycle) is distinct from
+`renderId` (monotonic per batch).
+
+```typescript
+interface ProfileData {
+  fileName?: string
+  cycleId: string          // shared by every batch from one React render pass - the join key
+  renderId: number         // monotonic per batch (the main walk + each callback)
+  trigger: 'render' | 'callback'
+  totalTime: number        // ms for this batch's synchronous walk
+  nodes: ProfilerNodeTiming[]  // post-order
+  callback?: {             // present only when trigger === 'callback'
+    location: SourceLocation // the render-prop/function-child's position in your source
+    source: string           // its raw source text
+    loopIndex: number | undefined // which host invocation (0, 1, 2 ...) drove this call
+  }
+}
+
+interface ProfilerNodeTiming {
+  id: number               // unique within the batch
+  parentId: number | null  // enclosing node's id - lets you rebuild the tree
+  depth: number
+  nodeType: string         // AST node type, e.g. 'JSXElement', 'CallExpression'
+  source: string           // raw node text
+  location: SourceLocation // { line, column, startOffset, endOffset } in your source
+  selfTime: number         // ms exclusive (this node minus its children)
+  totalTime: number        // ms inclusive (node + subtree)
+  loopIndex: number | undefined // the .map()/iteration index that produced this node
+}
+```
+
+`ProfileData` and `ProfilerNodeTiming` are exported from the package. See `source/demo.tsx` for a
+worked drill-down visualizer (a sortable tree table with source-range highlighting).
 

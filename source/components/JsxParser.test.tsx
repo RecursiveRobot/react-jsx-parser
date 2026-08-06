@@ -9,6 +9,7 @@ import { vi } from 'vitest'
 import * as Acorn from 'acorn'
 import JsxParser from './JsxParser'
 import { JsxParserError } from '../helpers/errorUtilities'
+import { ProfilerSession } from '../helpers/profilerUtilities'
 
 const Custom = ({ children = [], className, text }) => (
 	<div className={className}>
@@ -2984,6 +2985,152 @@ describe('JsxParser Component', () => {
 			const second = ref.current.ParsedChildren[0].props.sourceInfo.astNode
 			// The cached AST hands out the same (read-only) node instance across inert re-renders.
 			expect(second).toBe(first)
+		})
+	})
+
+	describe('performance profiling', () => {
+		// Invokes its `renderRow` render-prop once per item *during its own render* — i.e. after the
+		// JsxParser walk that built `renderRow` has returned.  Each such call is a lazy invocation.
+		const List = ({ items = [], renderRow }) => (
+			<ul>
+				{items.map((item, index) => (
+					<li key={item}>{renderRow(item, index)}</li>
+				))}
+			</ul>
+		)
+		// Invokes a side-effect-only callback during render (a lazy invocation that builds no JSX).
+		// The spy is passed as an *argument* — a block body without JSX is not transpiled, so it can
+		// reference its params but not free bindings.
+		const Runner = ({ run, finish }) => {
+			run(finish)
+			return <span>ran</span>
+		}
+
+		const batches = fn => fn.mock.calls.map(call => call[0])
+
+		test('does not touch the profiler clock when onProfile is absent', () => {
+			const nowSpy = vi.spyOn(ProfilerSession.prototype, 'now')
+			const { rendered } = render(<JsxParser jsx="<div><span>hi</span></div>" />)
+
+			// No ProfilerSession is created and its clock is never read on the standard path.
+			expect(nowSpy).not.toHaveBeenCalled()
+			expect(rendered.textContent).toBe('hi')
+			nowSpy.mockRestore()
+		})
+
+		test('emits one render batch with a well-formed node tree', () => {
+			const onProfile = vi.fn()
+			const jsx = '<div className="wrap">{greeting}<ul>{items.map(i => <li>{i}</li>)}</ul></div>'
+			render(<JsxParser jsx={jsx} bindings={{ greeting: 'hi', items: ['a', 'b'] }} onProfile={onProfile} />)
+
+			const renderBatches = batches(onProfile).filter(b => b.trigger === 'render')
+			expect(renderBatches).toHaveLength(1)
+			const [batch] = renderBatches
+			expect(batch.nodes.length).toBeGreaterThan(0)
+			expect(batch.totalTime).toBeGreaterThanOrEqual(0)
+
+			// Nodes are post-order (parents follow their children), so collect all ids up front.
+			const allIds = new Set(batch.nodes.map(n => n.id))
+			expect(allIds.size).toBe(batch.nodes.length) // ids unique within the batch
+			batch.nodes.forEach(node => {
+				expect(typeof node.nodeType).toBe('string')
+				expect(typeof node.location.startOffset).toBe('number')
+				expect(typeof node.location.endOffset).toBe('number')
+				expect(node.selfTime).toBeGreaterThanOrEqual(0)
+				expect(node.totalTime).toBeGreaterThanOrEqual(node.selfTime)
+				expect(node.parentId === null || allIds.has(node.parentId)).toBe(true)
+			})
+
+			// Offset invariant (same one the error path upholds): slicing the user source by a node's
+			// offsets yields exactly its recorded `source`.  No trimming needed for this template.
+			const sample = batch.nodes.find(n => n.nodeType === 'JSXElement')
+			expect(jsx.slice(sample.location.startOffset, sample.location.endOffset)).toBe(sample.source)
+
+			// The `.map()` builds `<li>{i}</li>` once per item, tagged with the producing loopIndex.
+			const liNodes = batch.nodes.filter(n => n.source.startsWith('<li>'))
+			expect(liNodes.map(n => n.loopIndex).sort()).toEqual([0, 1])
+		})
+
+		test('emits a separate callback batch per lazy render-prop invocation, joined by cycleId', () => {
+			const onProfile = vi.fn()
+			const jsx = '<List items={rows} renderRow={row => <b>{row}</b>} />'
+			render(
+				<JsxParser jsx={jsx} components={{ List }} bindings={{ rows: ['x', 'y', 'z'] }} onProfile={onProfile} />,
+			)
+
+			const all = batches(onProfile)
+			const renderBatch = all.find(b => b.trigger === 'render')
+			const callbackBatches = all.filter(b => b.trigger === 'callback')
+
+			// One callback batch per host invocation of the render-prop.
+			expect(callbackBatches).toHaveLength(3)
+			// The render batch is emitted before any lazy callback fires.
+			expect(all[0].trigger).toBe('render')
+
+			callbackBatches.forEach(b => {
+				// Joined back to the render that produced the function...
+				expect(b.cycleId).toBe(renderBatch.cycleId)
+				// ...but each batch is its own delivery.
+				expect(b.renderId).not.toBe(renderBatch.renderId)
+				expect(b.callback.source).toBe('row => <b>{row}</b>')
+				expect(typeof b.callback.location.startOffset).toBe('number')
+				expect(b.nodes.some(n => n.source.startsWith('<b>'))).toBe(true)
+			})
+
+			// loopIndex distinguishes which host invocation (0, 1, 2) drove each callback.
+			expect(callbackBatches.map(b => b.callback.loopIndex).sort()).toEqual([0, 1, 2])
+		})
+
+		test('suppresses lazy callbacks that build no nodes', () => {
+			const onProfile = vi.fn()
+			const report = vi.fn()
+			const jsx = '<Runner run={done => { done() }} finish={report} />'
+			render(<JsxParser jsx={jsx} components={{ Runner }} bindings={{ report }} onProfile={onProfile} />)
+
+			expect(report).toHaveBeenCalledTimes(1)
+			const all = batches(onProfile)
+			expect(all.filter(b => b.trigger === 'render')).toHaveLength(1)
+			// The side-effect-only callback rendered nothing, so no callback batch is delivered.
+			expect(all.filter(b => b.trigger === 'callback')).toHaveLength(0)
+		})
+
+		test('computes self/total time consistently with a mocked monotonic clock', () => {
+			let clock = 0
+			const nowSpy = vi.spyOn(ProfilerSession.prototype, 'now').mockImplementation(() => {
+				clock += 1
+				return clock
+			})
+			const onProfile = vi.fn()
+			render(<JsxParser jsx="<div><span>hi</span></div>" onProfile={onProfile} />)
+
+			const [batch] = batches(onProfile).filter(b => b.trigger === 'render')
+			const childrenOf = {}
+			batch.nodes.forEach(n => {
+				if (n.parentId !== null) (childrenOf[n.parentId] ||= []).push(n)
+			})
+			batch.nodes.forEach(node => {
+				const childTotal = (childrenOf[node.id] || []).reduce((sum, c) => sum + c.totalTime, 0)
+				// selfTime is inclusive time minus direct children's inclusive time — exact under integers.
+				expect(node.selfTime).toBe(node.totalTime - childTotal)
+				expect(node.selfTime).toBeGreaterThanOrEqual(0)
+			})
+			nowSpy.mockRestore()
+		})
+
+		test('increments renderId and mints a fresh cycleId across re-renders', () => {
+			const onProfile = vi.fn()
+			const ref = React.createRef()
+			const jsx = '<div>{n}</div>'
+			const { rerender } = rtlRender(
+				<JsxParser ref={ref} jsx={jsx} bindings={{ n: 1 }} onProfile={onProfile} />,
+				{ container: parent },
+			)
+			rerender(<JsxParser ref={ref} jsx={jsx} bindings={{ n: 2 }} onProfile={onProfile} />)
+
+			const renderBatches = batches(onProfile).filter(b => b.trigger === 'render')
+			expect(renderBatches.length).toBeGreaterThanOrEqual(2)
+			expect(renderBatches[1].renderId).toBeGreaterThan(renderBatches[0].renderId)
+			expect(renderBatches[1].cycleId).not.toBe(renderBatches[0].cycleId)
 		})
 	})
 })

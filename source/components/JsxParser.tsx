@@ -4,6 +4,7 @@ import * as AcornJSX from 'acorn-jsx'
 import React, { Fragment, ComponentType, ExoticComponent } from 'react'
 import { transpileFunctionBody, isSpreadElement, constructFunction } from '../helpers/functionUtilities'
 import { JsxParserError, SourceInfo, buildErrorFromOffsets, getLocationFromOffsets, sanitizeHtml } from '../helpers/errorUtilities'
+import { ProfileData, ProfilerSession } from '../helpers/profilerUtilities'
 import ATTRIBUTES from '../constants/attributeNames'
 import { canHaveChildren, canHaveWhitespace } from '../constants/specialTags'
 import { randomHash } from '../helpers/hash'
@@ -27,6 +28,7 @@ export type TProps = {
 	fileName?: string,
 	jsx?: string,
 	onError?: (error: JsxParserError) => void,
+	onProfile?: (data: ProfileData) => void,
 	renderError?: (props: { error: string }) => React.JSX.Element | null,
 	renderInWrapper?: boolean,
 	renderUnrecognized?: (tagName: string) => React.JSX.Element | null,
@@ -54,6 +56,7 @@ export default class JsxParser extends React.Component<TProps> {
 		fileName: undefined,
 		jsx: '',
 		onError: () => { },
+		onProfile: undefined,
 		renderError: undefined,
 		renderInWrapper: true,
 		renderUnrecognized: () => null,
@@ -91,6 +94,29 @@ export default class JsxParser extends React.Component<TProps> {
 	#cachedWrappedJsx: string = ''
 	#cachedProcessedJsx: string = ''
 
+	// Profiling state.  `#profiler` is non-null only while an `onProfile` prop is supplied; it
+	// persists across the render→lazy-callback boundary within a React render pass (a host may
+	// invoke a render-prop after `#parseJSX` returns) and is shared by reference into the
+	// per-element sub-parsers spawned for block-bodied functions.  `#profileCycleId` is the
+	// per-render-pass join key stamped onto every batch (main walk + its lazy callbacks); it is
+	// a human-readable timestamp made unique by a per-instance hash + a same-millisecond counter.
+	#profiler: ProfilerSession | null = null
+	#profileCycleId: string = ''
+	#profileInstanceHash: string = randomHash()
+	#profileSeq: number = 0
+
+	// Reassignable dispatch target for the AST walk.  Pointed once per render (in `#parseJSX`) — and
+	// per sub-parser in the block-body share block — at either `#evaluateExpression` (profiling off:
+	// the original method verbatim, no indirection or allocation) or `#profileExpression` (profiling
+	// on).  Every recursive `this.#parseExpression` call inside `#evaluateExpression` resolves to the
+	// chosen target, keeping a whole subtree on one path.  Always assigned before the walk uses it.
+	#parseExpression!: (expression: AcornJSX.Expression, scope?: Scope) => any
+
+	// Reassignable function-wrapping target, chosen alongside `#parseExpression`: `#trackIterationIndex`
+	// (profiling off) or `#profileIterationIndex` (profiling on).  Keeps the per-invocation `apply`
+	// trap free of profiling checks on the common path.  Always assigned before the walk uses it.
+	#trackIteration!: <T extends Function>(fn: T, sourceExpression?: AcornJSX.Expression) => T
+
 	#getRawTextForExpression: (expression: AcornJSX.Expression) => string =
 		(e: AcornJSX.Expression) => this.jsx.slice(e.start, e.end)
 
@@ -113,6 +139,11 @@ export default class JsxParser extends React.Component<TProps> {
 	// makes `#currentLoopIndex()` return N while that callback synchronously builds elements.
 	// A `Proxy` is used (rather than a plain wrapper) so the underlying function's behaviour —
 	// e.g. the scope-merging `apply` trap from `createFunctionProxy` — is preserved.
+	//
+	// This is the plain variant used when profiling is off; its `apply` trap carries no profiling
+	// logic at all.  `#trackIteration` (bound once per render in `#parseJSX`) selects between this
+	// and `#profileIterationIndex`, so the common path never pays for a per-call profiler check —
+	// mirroring the `#parseExpression`/`#evaluateExpression` split.
 	#trackIterationIndex = <T extends Function>(fn: T): T => {
 		let invocationCount = 0
 		return new Proxy(fn, {
@@ -123,6 +154,61 @@ export default class JsxParser extends React.Component<TProps> {
 				try {
 					return Reflect.apply(target as Function, thisArg, args)
 				} finally {
+					this.#loopIndexStack.pop()
+				}
+			},
+		})
+	}
+
+	// The profiling variant of `#trackIterationIndex`: identical loop-index tracking, plus lazy-batch
+	// capture.  A *lazy* invocation is one made with no profiling batch already open — a host
+	// component calling this render-prop/function-child after the main walk (and any enclosing
+	// callback) has returned; it gets its own batch bracketing exactly this call's subtree.  When a
+	// batch is already open (a `.map()` callback running inside the walk, or a nested callback),
+	// `lazy` is false and the nested `#parseExpression` calls simply record into the open batch —
+	// correct nesting, no double-counting.  `#profiler` is re-read here because a later
+	// non-profiling render may have cleared it after this function was constructed.
+	#profileIterationIndex = <T extends Function>(fn: T, sourceExpression?: AcornJSX.Expression): T => {
+		let invocationCount = 0
+		return new Proxy(fn, {
+			apply: (target, thisArg, args) => {
+				const index = invocationCount
+				invocationCount += 1
+				this.#loopIndexStack.push(index)
+				const profiler = this.#profiler
+				const lazy = profiler != null && !profiler.active
+				if (lazy) profiler!.begin()
+				const started = lazy ? profiler!.now() : 0
+				try {
+					return Reflect.apply(target as Function, thisArg, args)
+				} finally {
+					if (lazy) {
+						const totalTime = profiler!.now() - started
+						const { renderId, nodes } = profiler!.end()
+						// Suppress non-rendering callbacks (e.g. an event handler doing `setState`): with
+						// no nodes there is nothing to profile.  `sourceExpression` is always supplied for
+						// parser-built functions; the guard keeps TS honest for the optional param.
+						if (nodes.length && sourceExpression) {
+							this.props.onProfile?.({
+								fileName: this.props.fileName,
+								cycleId: this.#profileCycleId,
+								renderId,
+								trigger: 'callback',
+								totalTime,
+								nodes,
+								callback: {
+									location: getLocationFromOffsets(
+										this.#userJsx || this.jsx,
+										sourceExpression.start - this.#offsetDelta,
+										sourceExpression.end - this.#offsetDelta,
+									),
+									source: this.#getRawTextForExpression(sourceExpression),
+									// Read before the pop below: the top of the stack is this invocation's index.
+									loopIndex: this.#currentLoopIndex(),
+								},
+							})
+						}
+					}
 					this.#loopIndexStack.pop()
 				}
 			},
@@ -282,10 +368,63 @@ export default class JsxParser extends React.Component<TProps> {
 			this.#cachedProcessedJsx = jsx
 		}
 
+		// Decide profiling for this render pass (presence-based, like `onError`).  Bind the walk's
+		// dispatch target once here — no per-node branch — and, when profiling, mint the per-cycle
+		// join key and open the main batch.  A parent may add/remove `onProfile` between renders, so
+		// this is re-decided every render rather than once at construction.
+		if (this.props.onProfile) {
+			if (!this.#profiler) this.#profiler = new ProfilerSession()
+			this.#profileSeq += 1
+			this.#profileCycleId = `${new Date().toISOString()}-${this.#profileInstanceHash}-${this.#profileSeq}`
+			this.#parseExpression = this.#profileExpression
+			this.#trackIteration = this.#profileIterationIndex
+			this.#profiler.begin()
+			const start = this.#profiler.now()
+			const result = parsed.map(p => this.#parseExpression(p)).filter(Boolean)
+			const totalTime = this.#profiler.now() - start
+			const { renderId, nodes } = this.#profiler.end()
+			this.props.onProfile({
+				fileName: this.props.fileName,
+				cycleId: this.#profileCycleId,
+				renderId,
+				trigger: 'render',
+				totalTime,
+				nodes,
+			})
+			return result
+		}
+
+		this.#profiler = null
+		this.#parseExpression = this.#evaluateExpression
+		this.#trackIteration = this.#trackIterationIndex
 		return parsed.map(p => this.#parseExpression(p)).filter(Boolean)
 	}
 
-	#parseExpression = (expression: AcornJSX.Expression, scope?: Scope): any => {
+	// Times a single node's evaluation and records it against the active profiling batch, then
+	// recurses (children flow back through `this.#parseExpression`, so they nest under this frame).
+	// The `active` check is a safety valve for any entry made outside an open batch; on the normal
+	// profiling path the batch is always open, so nodes record.
+	#profileExpression = (expression: AcornJSX.Expression, scope?: Scope): any => {
+		const profiler = this.#profiler
+		if (!profiler || !profiler.active) return this.#evaluateExpression(expression, scope)
+		const frame = profiler.enter()
+		try {
+			return this.#evaluateExpression(expression, scope)
+		} finally {
+			profiler.exit(frame, {
+				nodeType: expression.type,
+				source: this.#getRawTextForExpression(expression),
+				location: getLocationFromOffsets(
+					this.#userJsx || this.jsx,
+					expression.start - this.#offsetDelta,
+					expression.end - this.#offsetDelta,
+				),
+				loopIndex: this.#currentLoopIndex(),
+			})
+		}
+	}
+
+	#evaluateExpression = (expression: AcornJSX.Expression, scope?: Scope): any => {
 		switch (expression.type) {
 		case 'JSXAttribute':
 			if (expression.value === null) return true
@@ -371,6 +510,17 @@ export default class JsxParser extends React.Component<TProps> {
 							// Share the iteration-index stack so elements rendered by this block-bodied
 							// function pick up the source-item index of the active invocation.
 							elementParser.#loopIndexStack = this.#loopIndexStack
+							// Share the profiling session so this sub-parser's nodes record into the same
+							// batch, keeping the timing tree connected across the block-body boundary.  The
+							// sub-parser must dispatch through *its own* `#profileExpression` (bound to its
+							// own offset context), not the outer one — so point it there when profiling is on.
+							elementParser.#profiler = this.#profiler
+							elementParser.#parseExpression = this.#profiler
+								? elementParser.#profileExpression
+								: elementParser.#evaluateExpression
+							elementParser.#trackIteration = this.#profiler
+								? elementParser.#profileIterationIndex
+								: elementParser.#trackIterationIndex
 							return elementParser.#parseExpression(elementExpression, elementScope)
 						},
 						mapBodyOffsetToSource,
@@ -379,7 +529,7 @@ export default class JsxParser extends React.Component<TProps> {
 					// source; JSX render calls are newline-padded (see `transpileFunctionBody`) so the
 					// transpiled body keeps the original line count, letting `constructFunction` resolve
 					// runtime-error offsets even when the body contained JSX.
-					return this.#trackIterationIndex(createFunctionProxy(
+					return this.#trackIteration(createFunctionProxy(
 						// eslint-disable-next-line no-new-func
 						constructFunction(
 							paramNames,
@@ -391,7 +541,7 @@ export default class JsxParser extends React.Component<TProps> {
 							this.#userJsx || this.jsx,
 						),
 						{ ...this.props.bindings, ...scope, ...jsxRenderFunctions },
-					) as unknown as Function)
+					) as unknown as Function, expression)
 				} catch (error: any) {
 					this.props.onError?.(this.#buildError(
 						'function-parse',
@@ -403,10 +553,10 @@ export default class JsxParser extends React.Component<TProps> {
 				}
 			}
 
-			return this.#trackIterationIndex((...args: any[]) : any => {
+			return this.#trackIteration((...args: any[]) : any => {
 				const functionScope: Record<string, any> = this.#getFunctionScope(scope, expression, args)
 				return this.#parseExpression(expression.body, functionScope)
-			})
+			}, expression)
 		case 'BinaryExpression':
 			/* eslint-disable eqeqeq,max-len */
 			switch (expression.operator) {
