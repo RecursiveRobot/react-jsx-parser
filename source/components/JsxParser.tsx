@@ -53,6 +53,8 @@ type ReactProfileEntry = {
 	phase: 'mount' | 'update' | 'nested-update'
 	actualDuration: number
 	baseDuration: number
+	startTime: number
+	commitTime: number
 }
 
 // The JSX is parsed wrapped in `<root>...</root>`; this prefix length is used to
@@ -226,6 +228,7 @@ export default class JsxParser extends React.Component<TProps> {
 								cycleId: this.#profileCycleId,
 								renderId,
 								trigger: 'callback',
+								startTime: started,
 								totalTime,
 								nodes,
 								callback: {
@@ -427,6 +430,7 @@ export default class JsxParser extends React.Component<TProps> {
 				cycleId: this.#profileCycleId,
 				renderId,
 				trigger: 'render',
+				startTime: start,
 				totalTime,
 				nodes,
 			})
@@ -448,8 +452,10 @@ export default class JsxParser extends React.Component<TProps> {
 		phase: 'mount' | 'update' | 'nested-update',
 		actualDuration: number,
 		baseDuration: number,
+		startTime: number,
+		commitTime: number,
 	): void => {
-		this.#reactBuffer.push({ meta, phase, actualDuration, baseDuration })
+		this.#reactBuffer.push({ meta, phase, actualDuration, baseDuration, startTime, commitTime })
 		if (!this.#reactFlushScheduled) {
 			this.#reactFlushScheduled = true
 			queueMicrotask(() => this.#flushReactProfile())
@@ -498,23 +504,28 @@ export default class JsxParser extends React.Component<TProps> {
 				}
 				return depth
 			}
-			const nodes: ProfilerNodeTiming[] = entries.map(({ meta, phase, actualDuration, baseDuration }) => ({
-				id: meta.instanceId,
-				// A parent outside this batch (e.g. lazily-invoked subtree) surfaces as a root.
-				parentId: meta.parentInstanceId !== null && actualById.has(meta.parentInstanceId)
-					? meta.parentInstanceId
-					: null,
-				depth: depthOf(meta.instanceId),
-				nodeType: meta.componentName,
-				source: meta.source,
-				location: meta.location,
-				selfTime: actualDuration - (childTotalById.get(meta.instanceId) ?? 0),
-				totalTime: actualDuration,
-				loopIndex: meta.loopIndex,
-				phase,
-				baseDuration,
-				componentName: meta.componentName,
-			}))
+			const nodes: ProfilerNodeTiming[] = entries.map(entry => {
+				const { meta, phase, actualDuration, baseDuration, startTime, commitTime } = entry
+				return {
+					id: meta.instanceId,
+					// A parent outside this batch (e.g. lazily-invoked subtree) surfaces as a root.
+					parentId: meta.parentInstanceId !== null && actualById.has(meta.parentInstanceId)
+						? meta.parentInstanceId
+						: null,
+					depth: depthOf(meta.instanceId),
+					nodeType: meta.componentName,
+					source: meta.source,
+					location: meta.location,
+					startTime,
+					selfTime: actualDuration - (childTotalById.get(meta.instanceId) ?? 0),
+					totalTime: actualDuration,
+					loopIndex: meta.loopIndex,
+					phase,
+					baseDuration,
+					commitTime,
+					componentName: meta.componentName,
+				}
+			})
 			const totalTime = nodes
 				.filter(n => n.parentId === null)
 				.reduce((sum, n) => sum + n.totalTime, 0)
@@ -523,6 +534,7 @@ export default class JsxParser extends React.Component<TProps> {
 				cycleId,
 				renderId: this.#profiler!.nextRenderId(),
 				trigger: 'react',
+				startTime: Math.min(...nodes.map(n => n.startTime)),
 				totalTime,
 				nodes,
 			})
@@ -1074,8 +1086,10 @@ export default class JsxParser extends React.Component<TProps> {
 			phase: 'mount' | 'update' | 'nested-update',
 			actualDuration: number,
 			baseDuration: number,
+			startTime: number,
+			commitTime: number,
 		): void => {
-			this.#collectReactTiming(meta, phase, actualDuration, baseDuration)
+			this.#collectReactTiming(meta, phase, actualDuration, baseDuration, startTime, commitTime)
 		}
 		return React.createElement(React.Profiler, { id: meta.componentName, key: props.key, onRender }, rendered)
 	}

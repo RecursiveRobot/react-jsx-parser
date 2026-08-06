@@ -3029,6 +3029,7 @@ describe('JsxParser Component', () => {
 			expect(batch.nodes.length).toBeGreaterThan(0)
 			expect(batch.totalTime).toBeGreaterThanOrEqual(0)
 
+			expect(typeof batch.startTime).toBe('number')
 			// Nodes are post-order (parents follow their children), so collect all ids up front.
 			const allIds = new Set(batch.nodes.map(n => n.id))
 			expect(allIds.size).toBe(batch.nodes.length) // ids unique within the batch
@@ -3036,6 +3037,7 @@ describe('JsxParser Component', () => {
 				expect(typeof node.nodeType).toBe('string')
 				expect(typeof node.location.startOffset).toBe('number')
 				expect(typeof node.location.endOffset).toBe('number')
+				expect(typeof node.startTime).toBe('number')
 				expect(node.selfTime).toBeGreaterThanOrEqual(0)
 				expect(node.totalTime).toBeGreaterThanOrEqual(node.selfTime)
 				expect(node.parentId === null || allIds.has(node.parentId)).toBe(true)
@@ -3105,7 +3107,9 @@ describe('JsxParser Component', () => {
 
 			const [batch] = batches(onProfile).filter(b => b.trigger === 'render')
 			const childrenOf = {}
+			const byId = {}
 			batch.nodes.forEach(n => {
+				byId[n.id] = n
 				if (n.parentId !== null) (childrenOf[n.parentId] ||= []).push(n)
 			})
 			batch.nodes.forEach(node => {
@@ -3113,7 +3117,15 @@ describe('JsxParser Component', () => {
 				// selfTime is inclusive time minus direct children's inclusive time — exact under integers.
 				expect(node.selfTime).toBe(node.totalTime - childTotal)
 				expect(node.selfTime).toBeGreaterThanOrEqual(0)
+				// startTime is the enter-time clock value: a parent enters before its children.
+				expect(typeof node.startTime).toBe('number')
+				if (node.parentId !== null) {
+					expect(node.startTime).toBeGreaterThanOrEqual(byId[node.parentId].startTime)
+				}
 			})
+			// The batch begins before any node it contains.
+			const earliest = Math.min(...batch.nodes.map(n => n.startTime))
+			expect(batch.startTime).toBeLessThanOrEqual(earliest)
 			nowSpy.mockRestore()
 		})
 
@@ -3182,7 +3194,12 @@ describe('JsxParser Component', () => {
 					expect(node.phase).toBe('mount')
 					expect(node.totalTime).toBeGreaterThanOrEqual(0)
 					expect(node.baseDuration).toBeGreaterThanOrEqual(0)
+					// React's own commit-phase timestamps flow through.
+					expect(typeof node.startTime).toBe('number')
+					expect(typeof node.commitTime).toBe('number')
 				})
+				// The batch begins at the earliest component's render start.
+				expect(batch.startTime).toBe(Math.min(...batch.nodes.map(n => n.startTime)))
 			})
 
 			test('reconstructs nesting and exclusive self-time for nested components', async () => {

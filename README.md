@@ -172,6 +172,7 @@ interface ProfileData {
   cycleId: string          // shared by every batch from one React render pass - the join key
   renderId: number         // monotonic per batch (the main walk + each callback)
   trigger: 'render' | 'callback' | 'react'
+  startTime: number        // when this batch's work began (performance.now-based; see note below)
   totalTime: number        // ms for this batch's synchronous walk ('react': summed root render time)
   nodes: ProfilerNodeTiming[]  // post-order
   callback?: {             // present only when trigger === 'callback'
@@ -188,15 +189,22 @@ interface ProfilerNodeTiming {
   nodeType: string         // AST node type, e.g. 'JSXElement', 'CallExpression'
   source: string           // raw node text
   location: SourceLocation // { line, column, startOffset, endOffset } in your source
+  startTime: number        // when this node's work began (performance.now-based; see note below)
   selfTime: number         // ms exclusive (this node minus its children)
   totalTime: number        // ms inclusive (node + subtree)
   loopIndex: number | undefined // the .map()/iteration index that produced this node
   // Present only on trigger: 'react' nodes:
   phase?: 'mount' | 'update' | 'nested-update' // the React commit phase
   baseDuration?: number    // React's estimated no-memoization render time (ms)
+  commitTime?: number      // when React committed this update (performance.now-based)
   componentName?: string   // the component's display name (also mirrored into nodeType)
 }
 ```
+
+All timestamps (`startTime`, `commitTime`) are [`performance.now()`](https://developer.mozilla.org/en-US/docs/Web/API/Performance/now)-based
+and therefore share one time origin — so nodes and batches can be ordered on a single timeline, and
+parser timings line up against React's own Profiler times. Timestamps are absolute; for a
+batch-relative offset use `node.startTime - batch.startTime`.
 
 `ProfileData` and `ProfilerNodeTiming` are exported from the package. See `source/demo.tsx` for a
 worked drill-down visualizer (a sortable tree table with source-range highlighting).

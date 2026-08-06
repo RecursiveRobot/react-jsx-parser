@@ -17,6 +17,10 @@ export interface ProfilerNodeTiming {
 	source: string
 	/// The node's position within the consumer's original (unwrapped) source.
 	location: SourceLocation
+	/// The clock value (`performance.now()`-based, so comparable across batches and with React's own
+	/// Profiler times) when this node's work began — the frame's entry for parser nodes, React's
+	/// `startTime` for `trigger: 'react'` nodes.
+	startTime: number
 	/// Milliseconds spent in this node alone (inclusive time minus children's inclusive time).
 	selfTime: number
 	/// Milliseconds spent in this node and its whole subtree.
@@ -29,6 +33,8 @@ export interface ProfilerNodeTiming {
 	phase?: 'mount' | 'update' | 'nested-update'
 	/// React's estimated no-memoization render time for the subtree (ms) — `trigger: 'react'` only.
 	baseDuration?: number
+	/// When React committed this update (`performance.now()`-based) — `trigger: 'react'` only.
+	commitTime?: number
 	/// The component's display name — `trigger: 'react'` only (also mirrored into `nodeType`).
 	componentName?: string
 }
@@ -51,6 +57,10 @@ export interface ProfileData {
 	/// Whether this batch is the main synchronous walk (`'render'`), a lazy callback
 	/// invocation (`'callback'`), or React's commit-phase component timings (`'react'`).
 	trigger: 'render' | 'callback' | 'react'
+	/// The clock value (`performance.now()`-based) when this batch's work began — the walk start for
+	/// `'render'`/`'callback'`, or the earliest component render start for `'react'`.  Subtract from a
+	/// node's `startTime` for a batch-relative offset.
+	startTime: number
 	/// Milliseconds for this batch: the synchronous walk for `'render'`/`'callback'`, or the
 	/// summed inclusive React render time of the root components for `'react'`.
 	totalTime: number
@@ -157,6 +167,7 @@ export class ProfilerSession {
 			nodeType: meta.nodeType,
 			source: meta.source,
 			location: meta.location,
+			startTime: frame.start,
 			selfTime: elapsed - frame.childTime,
 			totalTime: elapsed,
 			loopIndex: meta.loopIndex,
