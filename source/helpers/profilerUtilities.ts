@@ -52,6 +52,11 @@ export interface ProfileData {
 	fileName?: string
 	/// Shared by every batch from one React render pass — the join key.
 	cycleId: string
+	/// The `cycleId` of the enclosing `JsxParser`'s render that produced this one (auto-propagated via
+	/// context), or `null` for a root/top-level parser.  A page's main template and each nested
+	/// template fragment is a separate `JsxParser`; follow `parentCycleId` from a root `cycleId` to
+	/// group all renders of one page render together.
+	parentCycleId: string | null
 	/// Monotonic per-batch id (increments for the main pass and each callback).
 	renderId: number
 	/// Whether this batch is the main synchronous walk (`'render'`), a lazy callback

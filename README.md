@@ -213,11 +213,14 @@ worked drill-down visualizer (a sortable tree table with source-range highlighti
 
 The batches above measure how long the **parser** takes to evaluate the template and build elements.
 To also measure how long **React itself** takes to render the produced components, set
-`profileReactRender` (in addition to `onProfile`). Each resolved **custom component** (not host tags
-like `<div>`) is wrapped in a transparent [`React.Profiler`](https://react.dev/reference/react/Profiler),
+`profileReactRender` (in addition to `onProfile`). **Every rendered element** — host tags (`<div>`,
+`<li>`, …), custom components, and fragments — is wrapped in a transparent
+[`React.Profiler`](https://react.dev/reference/react/Profiler),
 and its commit-phase timings are delivered as an extra batch with `trigger: 'react'`, sharing the
 render's `cycleId`. Each node carries React's `phase`, inclusive `totalTime` (React's
-`actualDuration`), exclusive `selfTime`, and `baseDuration`.
+`actualDuration`), exclusive `selfTime`, and `baseDuration`. A `'react'` batch is emitted **per React
+commit**, so one render cycle may produce several (a mount plus any update/nested-update commits),
+each sharing the `cycleId` and each with a non-negative per-commit `selfTime`.
 
 Two caveats:
 - **Dev / profiling builds only.** `React.Profiler` reports nothing in a plain production React
@@ -227,4 +230,10 @@ Two caveats:
   changes what is rendered. `'react'` batches arrive on a microtask after commit (later than the
   synchronous `'render'`/`'callback'` batches of the same `cycleId`), and a lazily-invoked
   render-prop's components appear as roots of their own `'react'` batch.
+
+Every batch also carries `parentCycleId` — the `cycleId` of the enclosing `JsxParser`'s render that
+produced it, or `null` at the root. When templates nest — a main template rendering fragment templates
+that are themselves `JsxParser` instances — it is propagated automatically through an internal context
+(via a stable holder, so it never forces a re-render), so a consumer can follow `parentCycleId` from a
+root `cycleId` to correlate a page's main + sub-template renders with no wiring.
 

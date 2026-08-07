@@ -61,9 +61,20 @@ type ReactProfileEntry = {
 // map AST/Acorn offsets back onto the user's original (unwrapped) source.
 const ROOT_PREFIX_LENGTH = '<root>'.length
 
+// Carries the enclosing `JsxParser`'s current `cycleId` down to nested `JsxParser` instances (which
+// render as React descendants of the parent's output).  A nested parser reads this as its
+// `parentCycleId`, letting a profiling consumer correlate a page's main + sub-template renders with
+// no app wiring.  The context value is a STABLE holder object (mutated in place each parent render),
+// not the `cycleId` string itself — so a per-render-changing id propagates WITHOUT forcing memoized
+// descendants to re-render (which would skew the render timings).
+const CycleCorrelationContext = React.createContext<{ current: string | null } | null>(null)
+
 /* eslint-disable consistent-return */
 export default class JsxParser extends React.Component<TProps> {
 	static displayName = 'JsxParser'
+	// Read the nearest ancestor parser's cycleId holder (see `CycleCorrelationContext`).
+	static contextType = CycleCorrelationContext
+	declare context: React.ContextType<typeof CycleCorrelationContext>
 	static defaultProps: TProps = {
 		allowUnknownElements: true,
 		autoCloseVoidElements: false,
@@ -122,10 +133,17 @@ export default class JsxParser extends React.Component<TProps> {
 	// invoke a render-prop after `#parseJSX` returns) and is shared by reference into the
 	// per-element sub-parsers spawned for block-bodied functions.  `#profileCycleId` is the
 	// per-render-pass join key stamped onto every batch (main walk + its lazy callbacks); it is
-	// a human-readable timestamp made unique by a per-instance hash + a same-millisecond counter.
+	// a human-readable timestamp made unique by the per-instance `#profileInstanceHash` + a
+	// same-millisecond counter.  `#parentCycleId` is the enclosing parser's current `cycleId` (read
+	// from context), captured per render — `null` for a root parser.  `#cycleIdHolder` is this
+	// instance's stable holder published to descendants via context; its `.current` is set to the
+	// latest `#profileCycleId` each render so a nested parser reads the parent's current cycle without
+	// the context value changing identity (no forced re-renders / no timing skew).
 	#profiler: ProfilerSession | null = null
 	#profileCycleId: string = ''
 	#profileInstanceHash: string = randomHash()
+	#parentCycleId: string | null = null
+	#cycleIdHolder: { current: string | null } = { current: null }
 	#profileSeq: number = 0
 
 	// React-render profiling state (active only when `onProfile` is set AND `profileReactRender` is
@@ -225,6 +243,7 @@ export default class JsxParser extends React.Component<TProps> {
 						if (nodes.length && sourceExpression) {
 							this.props.onProfile?.({
 								fileName: this.props.fileName,
+								parentCycleId: this.#parentCycleId,
 								cycleId: this.#profileCycleId,
 								renderId,
 								trigger: 'callback',
@@ -415,6 +434,10 @@ export default class JsxParser extends React.Component<TProps> {
 			if (!this.#profiler) this.#profiler = new ProfilerSession()
 			this.#profileSeq += 1
 			this.#profileCycleId = `${new Date().toISOString()}-${this.#profileInstanceHash}-${this.#profileSeq}`
+			// Publish this render's cycleId to nested parsers (stable holder — see context) and capture
+			// the enclosing parser's current cycleId (or `null` at the root) as this render's parent.
+			this.#cycleIdHolder.current = this.#profileCycleId
+			this.#parentCycleId = this.context ? this.context.current : null
 			this.#parseExpression = this.#profileExpression
 			this.#trackIteration = this.#profileIterationIndex
 			// React-render profiling is a distinct opt-in on top of parser profiling: it modifies the
@@ -427,6 +450,7 @@ export default class JsxParser extends React.Component<TProps> {
 			const { renderId, nodes } = this.#profiler.end()
 			this.props.onProfile({
 				fileName: this.props.fileName,
+				parentCycleId: this.#parentCycleId,
 				cycleId: this.#profileCycleId,
 				renderId,
 				trigger: 'render',
@@ -556,6 +580,7 @@ export default class JsxParser extends React.Component<TProps> {
 					.reduce((sum, n) => sum + n.totalTime, 0)
 				onProfile({
 					fileName: this.props.fileName,
+					parentCycleId: this.#parentCycleId,
 					cycleId,
 					renderId: this.#profiler!.nextRenderId(),
 					trigger: 'react',
@@ -1170,11 +1195,20 @@ export default class JsxParser extends React.Component<TProps> {
 			.filter(Boolean)
 			.join(' ')
 
-		return (
-			this.props.renderInWrapper
-				? <div className={className}>{this.ParsedChildren}</div>
-				: <>{this.ParsedChildren}</>
-		)
+		const output = this.props.renderInWrapper
+			? <div className={className}>{this.ParsedChildren}</div>
+			: <>{this.ParsedChildren}</>
+
+		// When profiling, publish this instance's cycleId holder to nested `JsxParser` descendants so
+		// they can record their `parentCycleId` (see `CycleCorrelationContext`).  The holder identity is
+		// stable, so it never forces a descendant to re-render.  When off, output is left untouched.
+		return this.props.onProfile
+			? (
+				<CycleCorrelationContext.Provider value={this.#cycleIdHolder}>
+					{output}
+				</CycleCorrelationContext.Provider>
+			)
+			: output
 	}
 }
 /* eslint-enable consistent-return */

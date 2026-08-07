@@ -3145,6 +3145,48 @@ describe('JsxParser Component', () => {
 			expect(renderBatches[1].cycleId).not.toBe(renderBatches[0].cycleId)
 		})
 
+		test('a nested JsxParser records the parent render cycle as parentCycleId', () => {
+			const onProfile = vi.fn()
+			// `Sub` renders a standalone nested JsxParser — a React descendant of the parent's output.
+			const Sub = () => <JsxParser jsx="<span>sub</span>" onProfile={onProfile} />
+			render(<JsxParser jsx="<Sub />" components={{ Sub }} onProfile={onProfile} />)
+
+			const renders = batches(onProfile).filter(b => b.trigger === 'render')
+			const root = renders.find(b => b.parentCycleId === null)
+			const nested = renders.find(b => b.parentCycleId !== null)
+			expect(root).toBeDefined()
+			expect(nested).toBeDefined()
+			// The nested render points back to the parent render that produced it.
+			expect(nested.parentCycleId).toBe(root.cycleId)
+			expect(nested.cycleId).not.toBe(root.cycleId)
+		})
+
+		test('parentCycleId tracks the parent per render (changes on re-render)', () => {
+			const onProfile = vi.fn()
+			const ref = React.createRef()
+			// The nested parser re-renders with the parent (no memo), so it tracks the parent's cycleId.
+			const Sub = () => <JsxParser jsx="<span>{m}</span>" bindings={{ m: 'x' }} onProfile={onProfile} />
+			const jsx = '<Sub />'
+			const { rerender } = rtlRender(
+				<JsxParser ref={ref} jsx={jsx} components={{ Sub }} bindings={{ n: 1 }} onProfile={onProfile} />,
+				{ container: parent },
+			)
+			rerender(
+				<JsxParser ref={ref} jsx={jsx} components={{ Sub }} bindings={{ n: 2 }} onProfile={onProfile} />,
+			)
+
+			const renders = batches(onProfile).filter(b => b.trigger === 'render')
+			const roots = renders.filter(b => b.parentCycleId === null)
+			const nested = renders.filter(b => b.parentCycleId !== null)
+			expect(roots.length).toBeGreaterThanOrEqual(2) // two page renders
+			expect(nested.length).toBeGreaterThanOrEqual(2)
+			// cycleId is unique per render; each nested render points at its own render's root cycle.
+			expect(roots[0].cycleId).not.toBe(roots[1].cycleId)
+			expect(nested[0].parentCycleId).toBe(roots[0].cycleId)
+			expect(nested[1].parentCycleId).toBe(roots[1].cycleId)
+			expect(nested[0].parentCycleId).not.toBe(nested[1].parentCycleId) // per-render correlation
+		})
+
 		describe('React component render timing (profileReactRender)', () => {
 			const Leaf = ({ label }) => <span>{label}</span>
 			const Box = ({ children }) => <div>{children}</div>
