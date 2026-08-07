@@ -462,10 +462,14 @@ export default class JsxParser extends React.Component<TProps> {
 		}
 	}
 
-	// Flushes the buffered React commit timings as `'react'` batches (one per `cycleId`; normally a
-	// single cycle per commit, grouped defensively).  Reconstructs the per-instance tree from the
-	// captured `instanceId`/`parentInstanceId`, derives `depth` and exclusive `selfTime` (React's
-	// `actualDuration` is inclusive of nested Profilers), and joins to the render via `cycleId`.
+	// Flushes the buffered React commit timings as `'react'` batches — **one batch per React commit**.
+	// A single render cycle (one `cycleId`) can be committed several times (mount, then any
+	// update/nested-update), and each commit re-fires `onRender` for the affected Profilers under the
+	// same `cycleId`.  Self-time subtraction is only valid *within* a commit (React's `actualDuration`
+	// is inclusive of nested Profilers per commit), so entries must be partitioned per commit before
+	// the tree/`selfTime` math — otherwise a cheap nested-update parent gets a mount-sized child total
+	// subtracted and `selfTime` goes negative.  Batches from one cycle share `cycleId` (the join key)
+	// and differ by `commitTime`/`phase`/`renderId`.
 	#flushReactProfile = (): void => {
 		const buffer = this.#reactBuffer
 		this.#reactBuffer = []
@@ -473,6 +477,8 @@ export default class JsxParser extends React.Component<TProps> {
 		const { onProfile } = this.props
 		if (!onProfile || !buffer.length || !this.#profiler) return
 
+		// Group by cycle first: instance ids reset per parse (`#reactInstanceSeq`), so they are only
+		// unique within a cycle, and the buffer may span more than one parse.
 		const byCycle = new Map<string, ReactProfileEntry[]>()
 		buffer.forEach(entry => {
 			const group = byCycle.get(entry.meta.cycleId)
@@ -480,63 +486,83 @@ export default class JsxParser extends React.Component<TProps> {
 			else byCycle.set(entry.meta.cycleId, [entry])
 		})
 
-		byCycle.forEach((entries, cycleId) => {
-			const actualById = new Map<number, number>()
-			const parentById = new Map<number, number | null>()
-			entries.forEach(e => {
-				actualById.set(e.meta.instanceId, e.actualDuration)
-				parentById.set(e.meta.instanceId, e.meta.parentInstanceId)
-			})
-			// Direct-children inclusive time per instance, for exclusive `selfTime`.
-			const childTotalById = new Map<number, number>()
-			entries.forEach(e => {
-				const parent = e.meta.parentInstanceId
-				if (parent !== null && actualById.has(parent)) {
-					childTotalById.set(parent, (childTotalById.get(parent) ?? 0) + e.actualDuration)
+		byCycle.forEach((cycleEntries, cycleId) => {
+			// Partition a cycle's entries (in arrival order) into per-commit runs.  Every Profiler
+			// fires at most once per commit and a commit's `onRender`s are contiguous, so a repeated
+			// `instanceId` marks the start of the next commit.  Resolution-independent (unlike grouping
+			// by `commitTime`, which the clock clamp can collapse for an immediate nested-update).
+			const commitRuns: ReactProfileEntry[][] = []
+			let seen = new Set<number>()
+			let run: ReactProfileEntry[] = []
+			cycleEntries.forEach(entry => {
+				if (seen.has(entry.meta.instanceId)) {
+					commitRuns.push(run)
+					run = []
+					seen = new Set<number>()
 				}
+				run.push(entry)
+				seen.add(entry.meta.instanceId)
 			})
-			const depthOf = (instanceId: number): number => {
-				let depth = 0
-				let current = parentById.get(instanceId) ?? null
-				while (current !== null && actualById.has(current)) {
-					depth += 1
-					current = parentById.get(current) ?? null
+			if (run.length) commitRuns.push(run)
+
+			commitRuns.forEach(entries => {
+				const actualById = new Map<number, number>()
+				const parentById = new Map<number, number | null>()
+				entries.forEach(e => {
+					actualById.set(e.meta.instanceId, e.actualDuration)
+					parentById.set(e.meta.instanceId, e.meta.parentInstanceId)
+				})
+				// Direct-children inclusive time per instance, for exclusive `selfTime`.
+				const childTotalById = new Map<number, number>()
+				entries.forEach(e => {
+					const parent = e.meta.parentInstanceId
+					if (parent !== null && actualById.has(parent)) {
+						childTotalById.set(parent, (childTotalById.get(parent) ?? 0) + e.actualDuration)
+					}
+				})
+				const depthOf = (instanceId: number): number => {
+					let depth = 0
+					let current = parentById.get(instanceId) ?? null
+					while (current !== null && actualById.has(current)) {
+						depth += 1
+						current = parentById.get(current) ?? null
+					}
+					return depth
 				}
-				return depth
-			}
-			const nodes: ProfilerNodeTiming[] = entries.map(entry => {
-				const { meta, phase, actualDuration, baseDuration, startTime, commitTime } = entry
-				return {
-					id: meta.instanceId,
-					// A parent outside this batch (e.g. lazily-invoked subtree) surfaces as a root.
-					parentId: meta.parentInstanceId !== null && actualById.has(meta.parentInstanceId)
-						? meta.parentInstanceId
-						: null,
-					depth: depthOf(meta.instanceId),
-					nodeType: meta.componentName,
-					source: meta.source,
-					location: meta.location,
-					startTime,
-					selfTime: actualDuration - (childTotalById.get(meta.instanceId) ?? 0),
-					totalTime: actualDuration,
-					loopIndex: meta.loopIndex,
-					phase,
-					baseDuration,
-					commitTime,
-					componentName: meta.componentName,
-				}
-			})
-			const totalTime = nodes
-				.filter(n => n.parentId === null)
-				.reduce((sum, n) => sum + n.totalTime, 0)
-			onProfile({
-				fileName: this.props.fileName,
-				cycleId,
-				renderId: this.#profiler!.nextRenderId(),
-				trigger: 'react',
-				startTime: Math.min(...nodes.map(n => n.startTime)),
-				totalTime,
-				nodes,
+				const nodes: ProfilerNodeTiming[] = entries.map(entry => {
+					const { meta, phase, actualDuration, baseDuration, startTime, commitTime } = entry
+					return {
+						id: meta.instanceId,
+						// A parent outside this commit (e.g. lazily-invoked subtree) surfaces as a root.
+						parentId: meta.parentInstanceId !== null && actualById.has(meta.parentInstanceId)
+							? meta.parentInstanceId
+							: null,
+						depth: depthOf(meta.instanceId),
+						nodeType: meta.componentName,
+						source: meta.source,
+						location: meta.location,
+						startTime,
+						selfTime: actualDuration - (childTotalById.get(meta.instanceId) ?? 0),
+						totalTime: actualDuration,
+						loopIndex: meta.loopIndex,
+						phase,
+						baseDuration,
+						commitTime,
+						componentName: meta.componentName,
+					}
+				})
+				const totalTime = nodes
+					.filter(n => n.parentId === null)
+					.reduce((sum, n) => sum + n.totalTime, 0)
+				onProfile({
+					fileName: this.props.fileName,
+					cycleId,
+					renderId: this.#profiler!.nextRenderId(),
+					trigger: 'react',
+					startTime: Math.min(...nodes.map(n => n.startTime)),
+					totalTime,
+					nodes,
+				})
 			})
 		})
 	}

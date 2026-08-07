@@ -3240,6 +3240,39 @@ describe('JsxParser Component', () => {
 				batch.nodes.forEach(n => expect(n.parentId).toBeNull())
 				expect(batch.nodes.map(n => n.loopIndex).sort()).toEqual([0, 1, 2])
 			})
+
+			test('splits multiple commits of one cycle into separate batches (no negative self-time)', async () => {
+				// `Outer` schedules a one-time state update in a layout effect, forcing a second
+				// (nested-update) commit under the SAME cycleId as the mount — the scenario that made
+				// self-time subtraction span two commits and go negative.
+				const Inner = () => <span>inner</span>
+				const Outer = ({ children }) => {
+					const [, bump] = React.useState(0)
+					React.useLayoutEffect(() => { bump(1) }, [])
+					return <div>{children}</div>
+				}
+				const onProfile = vi.fn()
+				render(
+					<JsxParser jsx="<Outer><Inner /></Outer>" components={{ Outer, Inner }} onProfile={onProfile} profileReactRender />,
+				)
+				await flush()
+
+				const all = batches(onProfile)
+				const renderBatch = all.find(b => b.trigger === 'react')
+				const reactBatches = all.filter(b => b.trigger === 'react')
+				// Mount and the nested-update commit each produce their own batch, sharing the cycle.
+				expect(reactBatches.length).toBeGreaterThanOrEqual(2)
+				reactBatches.forEach(b => expect(b.cycleId).toBe(renderBatch.cycleId))
+
+				reactBatches.forEach(batch => {
+					// Each batch is a single commit → instance ids are unique within it.
+					expect(new Set(batch.nodes.map(n => n.id)).size).toBe(batch.nodes.length)
+					batch.nodes.forEach(node => {
+						expect(node.selfTime).toBeGreaterThanOrEqual(0)
+						expect(node.totalTime).toBeGreaterThanOrEqual(node.selfTime)
+					})
+				})
+			})
 		})
 	})
 })
