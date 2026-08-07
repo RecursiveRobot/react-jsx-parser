@@ -982,17 +982,14 @@ export default class JsxParser extends React.Component<TProps> {
 			? resolvePath(components, name)
 			: Fragment
 
-		// React-render profiling wraps only resolved custom components (host tags have a falsy
-		// `component`; `Fragment` is excluded).  Allocate this component's instance id and read its
-		// enclosing profiled component *before* parsing children, so nested components pick this up as
+		// React-render profiling wraps EVERY rendered element — host tags, custom components, and
+		// fragments — so the timing tree has no gaps.  Allocate this element's instance id and read its
+		// enclosing profiled element *before* parsing children, so nested elements pick this up as
 		// their parent — reconstructing exact React nesting even across `.map()`-looped instances.
-		const isProfiledComponent = this.#reactProfilingOn
-			&& element.type === 'JSXElement'
-			&& !!component
-			&& component !== Fragment
+		const isProfiledElement = this.#reactProfilingOn
 		let reactInstanceId = -1
 		let reactParentInstanceId: number | null = null
-		if (isProfiledComponent) {
+		if (isProfiledElement) {
 			reactInstanceId = this.#reactInstanceSeq
 			this.#reactInstanceSeq += 1
 			reactParentInstanceId = this.#reactParentStack.length
@@ -1022,8 +1019,8 @@ export default class JsxParser extends React.Component<TProps> {
 			}
 		}
 
-		// Children are built; this component is no longer the enclosing parent for what follows.
-		if (isProfiledComponent) this.#reactParentStack.pop()
+		// Children are built; this element is no longer the enclosing parent for what follows.
+		if (isProfiledElement) this.#reactParentStack.pop()
 
 		const props: { [key: string]: any } = {
 			key: this.props.disableKeyGeneration ? undefined : randomHash(),
@@ -1087,18 +1084,22 @@ export default class JsxParser extends React.Component<TProps> {
 		}
 
 		const rendered = React.createElement(component || lowerName, props, children)
-		if (!isProfiledComponent) return rendered
+		if (!isProfiledElement) return rendered
 
-		// Wrap the component in a transparent `React.Profiler` (no DOM node).  The Profiler carries the
+		// Wrap the element in a transparent `React.Profiler` (no DOM node).  The Profiler carries the
 		// `key`, so list reconciliation and the multi-child key pass above keep working.  Its onRender
-		// closure captures this component's `meta`; commit-phase timings are collected + flushed as a
+		// closure captures this element's `meta`; commit-phase timings are collected + flushed as a
 		// `'react'` batch.  `element` is the AST node — its offsets map to the user's source.
-		const resolvedComponent = component as { displayName?: string, name?: string }
+		// Label: a custom component's display name; else the host tag name; else `'Fragment'`.
+		const customName = component && component !== Fragment
+			? (component as { displayName?: string, name?: string }).displayName
+				|| (component as { name?: string }).name
+			: undefined
 		const meta: ReactProfileMeta = {
 			cycleId: this.#profileCycleId,
 			instanceId: reactInstanceId,
 			parentInstanceId: reactParentInstanceId,
-			componentName: resolvedComponent.displayName || resolvedComponent.name || name,
+			componentName: customName || name || 'Fragment',
 			source: this.#getRawTextForExpression(element),
 			location: getLocationFromOffsets(
 				this.#userJsx || this.jsx,

@@ -3161,11 +3161,16 @@ describe('JsxParser Component', () => {
 				expect(batches(onProfile).filter(b => b.trigger === 'render')).toHaveLength(1)
 			})
 
-			test('emits no react batch for host-only templates', async () => {
+			test('profiles host elements too, nested correctly (no custom-component filter)', async () => {
 				const onProfile = vi.fn()
 				render(<JsxParser jsx="<div><span>hi</span></div>" onProfile={onProfile} profileReactRender />)
 				await flush()
-				expect(batches(onProfile).filter(b => b.trigger === 'react')).toHaveLength(0)
+				const [batch] = batches(onProfile).filter(b => b.trigger === 'react')
+				expect(batch).toBeDefined()
+				const div = batch.nodes.find(n => n.componentName === 'div')
+				const span = batch.nodes.find(n => n.componentName === 'span')
+				expect(div.parentId).toBeNull()
+				expect(span.parentId).toBe(div.id) // host elements form the tree, no gaps
 			})
 
 			test('emits one react batch per commit, a node per component, joined by cycleId', async () => {
@@ -3234,11 +3239,14 @@ describe('JsxParser Component', () => {
 				await flush()
 
 				const [batch] = batches(onProfile).filter(b => b.trigger === 'react')
-				expect(batch.nodes).toHaveLength(3)
-				expect(new Set(batch.nodes.map(n => n.id)).size).toBe(3)
-				// Siblings under a host <ul>: none parented to another Leaf.
-				batch.nodes.forEach(n => expect(n.parentId).toBeNull())
-				expect(batch.nodes.map(n => n.loopIndex).sort()).toEqual([0, 1, 2])
+				// The host <ul> is now profiled too and is the parent of the mapped <Leaf>s.
+				const ul = batch.nodes.find(n => n.componentName === 'ul')
+				const leaves = batch.nodes.filter(n => n.componentName === 'Leaf')
+				expect(ul.parentId).toBeNull()
+				expect(leaves).toHaveLength(3)
+				expect(new Set(leaves.map(n => n.id)).size).toBe(3)
+				leaves.forEach(n => expect(n.parentId).toBe(ul.id))
+				expect(leaves.map(n => n.loopIndex).sort()).toEqual([0, 1, 2])
 			})
 
 			test('splits multiple commits of one cycle into separate batches (no negative self-time)', async () => {
