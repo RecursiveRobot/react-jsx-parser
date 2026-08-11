@@ -7024,17 +7024,21 @@ function Kt(e) {
 	}, void 0);
 	return e.map((e) => e.replace(RegExp(`^\\s{${t ?? 0}}`), ""));
 }
-function qt(e, t) {
+function qt(e) {
+	let [t, ...n] = e.split("\n");
+	return n.length ? [t, ...Kt(n)].join("\n") : e;
+}
+function Jt(e, t) {
 	let n = Math.max(0, t - 3), r = Math.min(e.length, t + 2);
 	return `~~~jsx\n${e.slice(n, r).map((e, r) => {
 		let i = n + r + 1;
 		return `${i === t ? ">>> " : "    "}${i}: ${e}`;
 	}).join("\n")}\n~~~`;
 }
-function Jt(e, t, n) {
+function Yt(e, t, n) {
 	return `**${e}**\n\n${t}\n${n}`;
 }
-function Yt(e, t, n) {
+function Xt(e, t, n) {
 	let r = Math.max(0, t), i = e.slice(0, r);
 	return {
 		line: i.split("\n").length,
@@ -7043,9 +7047,9 @@ function Yt(e, t, n) {
 		endOffset: Math.max(r, n)
 	};
 }
-function Xt({ type: e, message: t, source: n, start: r, end: i, fileName: a, cause: o, astNode: s, loopIndex: c }) {
-	let l = Yt(n, r, i), u = qt(n.split("\n"), l.line);
-	return new Gt(Jt(t, `Error occurred at line \`${l.line}\`${a ? ` of \`${a}\`` : ""}:`, u), {
+function Zt({ type: e, message: t, source: n, start: r, end: i, fileName: a, cause: o, astNode: s, loopIndex: c }) {
+	let l = Xt(n, r, i), u = Jt(n.split("\n"), l.line);
+	return new Gt(Yt(t, `Error occurred at line \`${l.line}\`${a ? ` of \`${a}\`` : ""}:`, u), {
 		type: e,
 		snippet: u,
 		cause: o,
@@ -7058,9 +7062,9 @@ function Xt({ type: e, message: t, source: n, start: r, end: i, fileName: a, cau
 		}
 	});
 }
-function Zt(e) {
-	let { type: t, message: n, bodyLines: r, line: i, functionName: a, fileName: o, cause: s, sourceText: c, startOffset: l, endOffset: u } = e, d = qt(r, i), f = `line \`${i}\`${o ? ` of \`${o}\`` : ""}`, p = a ? `Error occurred in dynamic function \`${a}\` at ${f}:` : `Error occurred at ${f}:`, m = c !== void 0 && l !== void 0 && u !== void 0, h = m ? Yt(c, l, u) : { line: i }, g = m ? c.slice(h.startOffset, h.endOffset) : r[i - 1];
-	return new Gt(Jt(n, p, d), {
+function Qt(e) {
+	let { type: t, message: n, bodyLines: r, line: i, functionName: a, fileName: o, cause: s, sourceText: c, startOffset: l, endOffset: u } = e, d = Jt(r, i), f = `line \`${i}\`${o ? ` of \`${o}\`` : ""}`, p = a ? `Error occurred in dynamic function \`${a}\` at ${f}:` : `Error occurred at ${f}:`, m = c !== void 0 && l !== void 0 && u !== void 0, h = m ? Xt(c, l, u) : { line: i }, g = m ? c.slice(h.startOffset, h.endOffset) : r[i - 1];
+	return new Gt(Yt(n, p, d), {
 		type: t,
 		snippet: d,
 		cause: s,
@@ -7073,7 +7077,7 @@ function Zt(e) {
 		}
 	});
 }
-function Qt(e) {
+function $t(e) {
 	let t = {
 		"&": "&amp;",
 		"<": "&lt;",
@@ -7085,11 +7089,11 @@ function Qt(e) {
 }
 //#endregion
 //#region source/helpers/functionUtilities.ts
-function $t(e) {
+function en(e) {
 	return e.type === "SpreadElement";
 }
-var en = " const __jsxRenderContext__ = this;\r\n";
-function tn(e) {
+var tn = " const __jsxRenderContext__ = this;\r\n";
+function nn(e) {
 	let t = /* @__PURE__ */ new Set(), n = (e, r = /* @__PURE__ */ new Set()) => {
 		if (e) switch (e.type) {
 			case "Identifier":
@@ -7097,7 +7101,7 @@ function tn(e) {
 				break;
 			case "ArrayExpression":
 				(e.elements || []).forEach((e) => {
-					if ($t(e)) {
+					if (en(e)) {
 						n(e.argument, r);
 						return;
 					}
@@ -7169,7 +7173,7 @@ function tn(e) {
 				break;
 			case "ObjectExpression":
 				(e.properties || []).forEach((e) => {
-					if ($t(e)) {
+					if (en(e)) {
 						n(e.argument, r);
 						return;
 					}
@@ -7185,14 +7189,14 @@ function tn(e) {
 	};
 	return n(e), Array.from(t.values());
 }
-function nn(e, t, n, r = 0) {
+function rn(e, t, n, r = 0) {
 	let i = I.extend(Wt.default({ autoCloseVoidElements: !0 })).parse(e, { ecmaVersion: "latest" });
 	return (a) => n(e, i.body[0], {
 		...t,
 		...a
 	}, r);
 }
-function rn(e) {
+function an(e) {
 	let t = I.extend(Wt.default({ autoCloseVoidElements: !0 })).parse(`function dummy() ${e}`, { ecmaVersion: "latest" }), n = [], r = (e) => {
 		if (e) switch (e.type) {
 			case "JSXElement":
@@ -7210,20 +7214,20 @@ function rn(e) {
 	};
 	return r(t), n;
 }
-function an(e, t, n, r = (e) => e) {
+function on(e, t, n, r = (e) => e) {
 	let i = {}, a = [];
-	if (rn(e).forEach((o, s) => {
+	if (an(e).forEach((o, s) => {
 		let c = `renderJSXElementWrapper_${s}`;
-		i[c] = nn(e.slice(o.start, o.end), t, n, r(o.start));
+		i[c] = rn(e.slice(o.start, o.end), t, n, r(o.start));
 		let l = e.slice(o.start, o.end), u = l.split("\n").length - 1;
-		a.push([l, `__jsxRenderContext__.${c}({ ${tn(o).join(", ")} })${"\n".repeat(u)}`]);
+		a.push([l, `__jsxRenderContext__.${c}({ ${nn(o).join(", ")} })${"\n".repeat(u)}`]);
 	}), !a.length) return [e, {}];
-	let o = `{${en}${e.slice(1)}`;
+	let o = `{${tn}${e.slice(1)}`;
 	return a.forEach(([e, t]) => {
 		o = o.replace(e, t);
 	}), [o, i];
 }
-function on(e, t, n = "anonymous", r, i, a, o) {
+function sn(e, t, n = "anonymous", r, i, a, o) {
 	let s = `dynamic-${n}-${Math.random().toString(36).substring(2, 9)}.js`, c = t.match(/^\{{1}([\S\s]*)\}{1}$/)?.[1] ?? t;
 	c = c.replace(/^\n+|\n+$/g, "");
 	let l = `//# sourceURL=${s}\n${c}`, u = Function(...e, l);
@@ -7235,14 +7239,14 @@ function on(e, t, n = "anonymous", r, i, a, o) {
 			if (a && o !== void 0 && Number.isFinite(u) && u >= 1 && u <= f.length) {
 				let e = t.match(/^\{{1}([\S\s]*)\}{1}$/), n = e?.[1] ?? t;
 				if (n.startsWith(" const __jsxRenderContext__ = this;\r\n")) {
-					let e = a(0), t = Yt(o, e, e).line + u - 2, n = o.split("\n");
+					let e = a(0), t = Xt(o, e, e).line + u - 2, n = o.split("\n");
 					t >= 1 && t <= n.length && (p = n.slice(0, t - 1).reduce((e, t) => e + t.length + 1, 0), m = p + n[t - 1].length);
 				} else {
 					let t = +!!e + (n.match(/^\n+/)?.[0].length ?? 0), r = f.slice(0, u - 1).reduce((e, t) => e + t.length + 1, 0);
 					p = a(r + t), m = a(r + f[u - 1].length + t);
 				}
 			}
-			let h = Zt({
+			let h = Qt({
 				type: "function-runtime",
 				message: e.message,
 				bodyLines: d,
@@ -7264,7 +7268,7 @@ function on(e, t, n = "anonymous", r, i, a, o) {
 }
 //#endregion
 //#region source/helpers/profilerUtilities.ts
-var sn = class {
+var cn = class {
 	active = !1;
 	#e = 0;
 	#t = [];
@@ -7316,13 +7320,13 @@ var sn = class {
 			nodes: this.#t
 		};
 	}
-}, cn = {
+}, ln = {
 	class: "className",
 	for: "htmlFor",
 	maxlength: "maxLength",
 	colspan: "colSpan",
 	rowspan: "rowSpan"
-}, ln = [
+}, un = [
 	"area",
 	"base",
 	"br",
@@ -7339,45 +7343,45 @@ var sn = class {
 	"source",
 	"track",
 	"wbr"
-], un = [
+], dn = [
 	"table",
 	"tbody",
 	"tfoot",
 	"thead",
 	"tr"
 ];
-function dn(e) {
-	return ln.indexOf(e.toLowerCase()) === -1;
-}
 function fn(e) {
-	return un.indexOf(e.toLowerCase()) !== -1;
+	return un.indexOf(e.toLowerCase()) === -1;
+}
+function pn(e) {
+	return dn.indexOf(e.toLowerCase()) !== -1;
 }
 //#endregion
 //#region source/helpers/hash.ts
-var pn = (e = "", t = 16) => {
+var mn = (e = "", t = 16) => {
 	let n = String(e), r = 0;
 	return n.split("").forEach((e) => {
 		r = (r << 5) - r + e.charCodeAt(0), r &= r;
 	}), Math.abs(r).toString(t);
-}, mn = () => pn(Math.random().toString()), hn = (e) => e.replace(/([A-Z])([A-Z])/g, "$1 $2").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[^a-zA-Z\u00C0-\u00ff]/g, " ").toLowerCase().split(" ").filter((e) => e).map((e, t) => t > 0 ? e[0].toUpperCase() + e.slice(1) : e).join(""), gn = (e) => {
+}, hn = () => mn(Math.random().toString()), gn = (e) => e.replace(/([A-Z])([A-Z])/g, "$1 $2").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[^a-zA-Z\u00C0-\u00ff]/g, " ").toLowerCase().split(" ").filter((e) => e).map((e, t) => t > 0 ? e[0].toUpperCase() + e.slice(1) : e).join(""), _n = (e) => {
 	switch (typeof e) {
 		case "string": return e.split(";").filter((e) => e).reduce((e, t) => {
 			let n = t.slice(0, t.indexOf(":")).trim(), r = t.slice(t.indexOf(":") + 1).trim();
 			return {
 				...e,
-				[hn(n)]: r
+				[gn(n)]: r
 			};
 		}, {});
 		case "object": return e;
 		default: return;
 	}
-}, _n = (e) => e == null || e === "" ? [] : e.split("."), vn = (e, t) => {
+}, vn = (e) => e == null || e === "" ? [] : e.split("."), yn = (e, t) => {
 	let [n, ...r] = t;
-	if (!(e == null || n == null)) return r.length === 0 ? e[n] : vn(e[n], r);
-}, yn = (e, t) => vn(e, _n(t));
+	if (!(e == null || n == null)) return r.length === 0 ? e[n] : yn(e[n], r);
+}, bn = (e, t) => yn(e, vn(t));
 //#endregion
 //#region source/helpers/functionProxy.ts
-function bn(e, t) {
+function xn(e, t) {
 	let n = e;
 	return n.scope = t, new Proxy(n, { apply: (e, t, n) => Reflect.apply(e, {
 		...e.scope,
@@ -7386,9 +7390,9 @@ function bn(e, t) {
 }
 //#endregion
 //#region source/components/JsxParser.tsx
-var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
+var Sn = 6, Cn = e.createContext(null), wn = class i extends e.Component {
 	static displayName = "JsxParser";
-	static contextType = Sn;
+	static contextType = Cn;
 	static defaultProps = {
 		allowUnknownElements: !0,
 		autoCloseVoidElements: !1,
@@ -7422,7 +7426,7 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 	#s = "";
 	#c = null;
 	#l = "";
-	#u = mn();
+	#u = hn();
 	#d = null;
 	#f = { current: null };
 	#p = 0;
@@ -7434,12 +7438,13 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 	#y;
 	#b;
 	#x = (e) => this.jsx.slice(e.start, e.end);
-	#S = (e) => {
+	#S = (e) => qt(this.#x(e));
+	#C = (e) => {
 		let t = this.#x(e).replaceAll("`", "\\`");
 		return t.length > 50 ? `${t.slice(0, 47)}...` : t;
 	};
-	#C = () => this.#n.length ? this.#n[this.#n.length - 1] : void 0;
-	#w = (e) => {
+	#w = () => this.#n.length ? this.#n[this.#n.length - 1] : void 0;
+	#T = (e) => {
 		let t = 0;
 		return new Proxy(e, { apply: (e, n, r) => {
 			let i = t;
@@ -7451,7 +7456,7 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 			}
 		} });
 	};
-	#T = (e, t) => {
+	#E = (e, t) => {
 		let n = 0;
 		return new Proxy(e, { apply: (e, r, i) => {
 			let a = n;
@@ -7474,9 +7479,9 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 						totalTime: e,
 						nodes: r,
 						callback: {
-							location: Yt(this.#e || this.jsx, t.start - this.#t, t.end - this.#t),
-							source: this.#x(t),
-							loopIndex: this.#C()
+							location: Xt(this.#e || this.jsx, t.start - this.#t, t.end - this.#t),
+							source: this.#S(t),
+							loopIndex: this.#w()
 						}
 					});
 				}
@@ -7484,21 +7489,21 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 			}
 		} });
 	};
-	#E = (e) => {
+	#D = (e) => {
 		if (e) switch (e.type) {
 			case "Identifier": return e.name;
-			case "MemberExpression": return this.#E(e.object);
-			case "ChainExpression": return this.#E(e.expression);
+			case "MemberExpression": return this.#D(e.object);
+			case "ChainExpression": return this.#D(e.expression);
 			default: return;
 		}
 	};
-	#D = (e, t) => {
-		let n = this.#C(), r = this.#e, i = t.start - this.#t, a = t.end - this.#t, { fileName: o, onError: s } = this.props;
+	#O = (e, t) => {
+		let n = this.#w(), r = this.#e, i = t.start - this.#t, a = t.end - this.#t, { fileName: o, onError: s } = this.props;
 		return new Proxy(e, { apply: (e, c, l) => {
 			try {
 				return Reflect.apply(e, c, l);
 			} catch (e) {
-				s?.(Xt({
+				s?.(Zt({
 					type: "function-runtime",
 					message: e?.message ?? String(e),
 					source: r,
@@ -7513,14 +7518,14 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 			}
 		} });
 	};
-	#O = (e) => ({
+	#k = (e) => ({
 		fileName: this.props.fileName,
 		source: this.#x(e),
-		location: Yt(this.#e || this.jsx, e.start - this.#t, e.end - this.#t),
-		loopIndex: this.#C(),
+		location: Xt(this.#e || this.jsx, e.start - this.#t, e.end - this.#t),
+		loopIndex: this.#w(),
 		astNode: e
 	});
-	#k = (e, t, n, r) => Xt({
+	#A = (e, t, n, r) => Zt({
 		type: e,
 		message: t,
 		source: this.#e || this.jsx,
@@ -7529,11 +7534,11 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 		fileName: this.props.fileName,
 		cause: r,
 		astNode: n,
-		loopIndex: this.#C()
+		loopIndex: this.#w()
 	});
-	#A = () => {
+	#j = () => {
 		let e = this.props.jsx, t = this.props.autoCloseVoidElements;
-		this.#t = xn, this.#n = [], this.#h = [], this.#g = 0;
+		this.#t = Sn, this.#n = [], this.#h = [], this.#g = 0;
 		let n;
 		if (this.#r && this.#i === e && this.#a === t) this.jsx = this.#o, this.#e = this.#s, n = this.#r;
 		else {
@@ -7542,9 +7547,9 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 			try {
 				n = I.extend(Wt.default({ autoCloseVoidElements: t })).parse(i, { ecmaVersion: "latest" }).body[0].expression.children || [];
 			} catch (e) {
-				let t = typeof e?.pos == "number" ? e.pos - this.#t : 0, n = Xt({
+				let t = typeof e?.pos == "number" ? e.pos - this.#t : 0, n = Zt({
 					type: "parse",
-					message: Qt(String(e)),
+					message: $t(String(e)),
 					source: r,
 					start: t,
 					end: t,
@@ -7556,7 +7561,7 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 			this.#r = n, this.#i = e, this.#a = t, this.#o = i, this.#s = r;
 		}
 		if (this.props.onProfile) {
-			this.#c ||= new sn(), this.#p += 1, this.#l = `${(/* @__PURE__ */ new Date()).toISOString()}-${this.#u}-${this.#p}`, this.#f.current = this.#l, this.#d = this.context ? this.context.current : null, this.#y = this.#N, this.#b = this.#T, this.#m = this.props.profileReactRender === !0, this.#c.begin();
+			this.#c ||= new cn(), this.#p += 1, this.#l = `${(/* @__PURE__ */ new Date()).toISOString()}-${this.#u}-${this.#p}`, this.#f.current = this.#l, this.#d = this.context ? this.context.current : null, this.#y = this.#P, this.#b = this.#E, this.#m = this.props.profileReactRender === !0, this.#c.begin();
 			let e = this.#c.now(), t = n.map((e) => this.#y(e)).filter(Boolean), r = this.#c.now() - e, { renderId: i, nodes: a } = this.#c.end();
 			return this.props.onProfile({
 				fileName: this.props.fileName,
@@ -7569,9 +7574,9 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 				nodes: a
 			}), t;
 		}
-		return this.#c = null, this.#m = !1, this.#y = this.#P, this.#b = this.#w, n.map((e) => this.#y(e)).filter(Boolean);
+		return this.#c = null, this.#m = !1, this.#y = this.#F, this.#b = this.#T, n.map((e) => this.#y(e)).filter(Boolean);
 	};
-	#j = (e, t, n, r, i, a) => {
+	#M = (e, t, n, r, i, a) => {
 		this.#_.push({
 			meta: e,
 			phase: t,
@@ -7579,9 +7584,9 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 			baseDuration: r,
 			startTime: i,
 			commitTime: a
-		}), this.#v || (this.#v = !0, queueMicrotask(() => this.#M()));
+		}), this.#v || (this.#v = !0, queueMicrotask(() => this.#N()));
 	};
-	#M = () => {
+	#N = () => {
 		let e = this.#_;
 		this.#_ = [], this.#v = !1;
 		let { onProfile: t } = this.props;
@@ -7640,34 +7645,34 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 			});
 		});
 	};
-	#N = (e, t) => {
+	#P = (e, t) => {
 		let n = this.#c;
-		if (!n || !n.active) return this.#P(e, t);
+		if (!n || !n.active) return this.#F(e, t);
 		let r = n.enter();
 		try {
-			return this.#P(e, t);
+			return this.#F(e, t);
 		} finally {
 			n.exit(r, {
 				nodeType: e.type,
-				source: this.#x(e),
-				location: Yt(this.#e || this.jsx, e.start - this.#t, e.end - this.#t),
-				loopIndex: this.#C()
+				source: this.#S(e),
+				location: Xt(this.#e || this.jsx, e.start - this.#t, e.end - this.#t),
+				loopIndex: this.#w()
 			});
 		}
 	};
-	#P = (e, n) => {
+	#F = (e, n) => {
 		switch (e.type) {
 			case "JSXAttribute": return e.value === null ? !0 : (this.lastAttributeName = e.name.name, this.#y(e.value, n));
 			case "JSXElement":
-			case "JSXFragment": return this.lastAttributeName = void 0, this.#L(e, n);
+			case "JSXFragment": return this.lastAttributeName = void 0, this.#R(e, n);
 			case "JSXExpressionContainer": return this.#y(e.expression, n);
 			case "JSXText":
-				let a = this.props.disableKeyGeneration ? void 0 : mn();
+				let a = this.props.disableKeyGeneration ? void 0 : hn();
 				return this.props.disableFragments ? e.value : /* @__PURE__ */ r(t, { children: e.value }, a);
 			case "ArrayExpression":
 				let o = [];
 				return (e.elements || []).forEach((e) => {
-					if ($t(e)) {
+					if (en(e)) {
 						let t = this.#y(e.argument, n);
 						t && o.push(...t);
 						return;
@@ -7676,7 +7681,7 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 					t !== void 0 && o.push(t);
 				}), o;
 			case "ArrowFunctionExpression":
-				if ((e.async || e.generator) && this.props.onError?.(this.#k("unsupported-function", "Async and generator arrow functions are not supported.", e, /* @__PURE__ */ SyntaxError("Async and generator arrow functions are not supported."))), e.body.type === "BlockStatement") {
+				if ((e.async || e.generator) && this.props.onError?.(this.#A("unsupported-function", "Async and generator arrow functions are not supported.", e, /* @__PURE__ */ SyntaxError("Async and generator arrow functions are not supported."))), e.body.type === "BlockStatement") {
 					let t = e.params.map((e, t) => {
 						switch (e.type) {
 							case "Identifier": return e.name;
@@ -7685,25 +7690,25 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 						}
 					}), r = e.params.some((e) => e.type !== "Identifier"), a = r ? `{ return (${this.#x(e)})(${t.join(", ")}); }` : this.#x(e.body), o = this.#t, s = r ? (t) => e.start + (t - 10) - o : (t) => e.body.start + t - o;
 					try {
-						let [r, o] = an(a, {
+						let [r, o] = on(a, {
 							...this.props.bindings,
 							...n
 						}, (e, t, n, r = 0) => {
 							let a = new i(this.props);
-							return a.jsx = e, a.#e = this.#e, a.#t = -r, a.#n = this.#n, a.#c = this.#c, a.#y = this.#c ? a.#N : a.#P, a.#b = this.#c ? a.#T : a.#w, a.#m = this.#m, a.#l = this.#l, a.#y(t, n);
+							return a.jsx = e, a.#e = this.#e, a.#t = -r, a.#n = this.#n, a.#c = this.#c, a.#y = this.#c ? a.#P : a.#F, a.#b = this.#c ? a.#E : a.#T, a.#m = this.#m, a.#l = this.#l, a.#y(t, n);
 						}, s);
-						return this.#b(bn(on(t, r, this.lastAttributeName, this.props.onError, this.props.fileName, s, this.#e || this.jsx), {
+						return this.#b(xn(sn(t, r, this.lastAttributeName, this.props.onError, this.props.fileName, s, this.#e || this.jsx), {
 							...this.props.bindings,
 							...n,
 							...o
 						}), e);
 					} catch (t) {
-						this.props.onError?.(this.#k("function-parse", `Unable to parse function \`${this.lastAttributeName ?? this.#S(e)}\` => ${t}.`, e, t));
+						this.props.onError?.(this.#A("function-parse", `Unable to parse function \`${this.lastAttributeName ?? this.#C(e)}\` => ${t}.`, e, t));
 						return;
 					}
 				}
 				return this.#b((...t) => {
-					let r = this.#R(n, e, t);
+					let r = this.#z(n, e, t);
 					return this.#y(e.body, r);
 				}, e);
 			case "BinaryExpression":
@@ -7727,7 +7732,7 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 			case "CallExpression":
 				let s = this.#y(e.callee, n);
 				if (s === void 0) {
-					this.props.onError?.(this.#k("invocation", `The expression \`${this.#S(e)}\` could not be resolved, resulting in an undefined return value.`, e, /* @__PURE__ */ TypeError(`\`${this.#S(e.callee)}\` is not a function.`)));
+					this.props.onError?.(this.#A("invocation", `The expression \`${this.#C(e)}\` could not be resolved, resulting in an undefined return value.`, e, /* @__PURE__ */ TypeError(`\`${this.#C(e.callee)}\` is not a function.`)));
 					return;
 				}
 				try {
@@ -7737,13 +7742,13 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 					};
 					return Reflect.apply(s, r, t);
 				} catch (t) {
-					this.props.onError?.(this.#k("call", `Unable to call expression \`${this.#S(e)}\` => ${t}.`, e, t));
+					this.props.onError?.(this.#A("call", `Unable to call expression \`${this.#C(e)}\` => ${t}.`, e, t));
 					return;
 				}
 			case "ChainExpression": try {
 				return this.#y(e.expression, n);
 			} catch (t) {
-				this.props.onError?.(this.#k("chain", `Unable to call expression \`${this.#S(e)}\` => ${t}.`, e, t));
+				this.props.onError?.(this.#A("chain", `Unable to call expression \`${this.#C(e)}\` => ${t}.`, e, t));
 				return;
 			}
 			case "ConditionalExpression": return this.#y(e.test, n) ? this.#y(e.consequent, n) : this.#y(e.alternate, n);
@@ -7758,18 +7763,18 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 					case "??": return c ?? l();
 					default: return !1;
 				}
-			case "MemberExpression": return this.#F(e, n);
+			case "MemberExpression": return this.#I(e, n);
 			case "NewExpression":
 				let u = this.#y(e.callee, n);
 				if (u === void 0) {
-					this.props.onError?.(this.#k("invocation", `The expression \`${this.#S(e)}\` could not be resolved, resulting in an undefined return value.`, e, /* @__PURE__ */ TypeError(`\`${this.#S(e.callee)}\` is not a constructor.`)));
+					this.props.onError?.(this.#A("invocation", `The expression \`${this.#C(e)}\` could not be resolved, resulting in an undefined return value.`, e, /* @__PURE__ */ TypeError(`\`${this.#C(e.callee)}\` is not a constructor.`)));
 					return;
 				}
 				return new u(...e.arguments.map((e) => this.#y(e, n)));
 			case "ObjectExpression":
 				let d = {};
 				return e.properties.forEach((e) => {
-					if ($t(e)) {
+					if (en(e)) {
 						let t = this.#y(e.argument, n);
 						Object.entries(t || {}).forEach(([e, t]) => {
 							d[e] = t;
@@ -7791,7 +7796,7 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 				return;
 		}
 	};
-	#F = (e, t) => {
+	#I = (e, t) => {
 		let { object: n } = e, r = (e) => ({
 			key: e.computed ? this.#y(e.property, t) : e.property?.name ?? JSON.parse(e.property?.raw ?? "\"\""),
 			optional: !!e.optional,
@@ -7807,44 +7812,44 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 							t = !0;
 							return;
 						}
-						throw TypeError(`Cannot read \`${r.key}\` of \`${this.#S(r.object)}\`, which is ${n === null ? "null" : "undefined"}.`);
+						throw TypeError(`Cannot read \`${r.key}\` of \`${this.#C(r.object)}\`, which is ${n === null ? "null" : "undefined"}.`);
 					}
 					return n[r.key];
 				}
 			}, a);
 			return typeof n == "function" ? n.bind(e) : n;
 		} catch (t) {
-			this.props.onError?.(this.#k("member-access", `Unable to resolve \`${this.#S(e)}\` => ${t}`, e, t));
+			this.props.onError?.(this.#A("member-access", `Unable to resolve \`${this.#C(e)}\` => ${t}`, e, t));
 		}
 	};
-	#I = (e) => e.type === "JSXIdentifier" ? e.name : `${this.#I(e.object)}.${this.#I(e.property)}`;
-	#L = (n, r) => {
-		let { allowUnknownElements: i, components: a, componentsOnly: o, onError: s } = this.props, { children: c = [] } = n, l = n.type === "JSXElement" ? n.openingElement : n.openingFragment, { attributes: u = [] } = l, d = n.type === "JSXElement" ? this.#I(l.name) : "", f = (this.props.blacklistedAttrs || []).map((e) => e instanceof RegExp ? e : new RegExp(e, "i")), p = (this.props.blacklistedTags || []).map((e) => e.trim().toLowerCase()).filter(Boolean);
-		if (/^(html|head|body)$/i.test(d)) return c.map((e) => this.#L(e, r));
+	#L = (e) => e.type === "JSXIdentifier" ? e.name : `${this.#L(e.object)}.${this.#L(e.property)}`;
+	#R = (n, r) => {
+		let { allowUnknownElements: i, components: a, componentsOnly: o, onError: s } = this.props, { children: c = [] } = n, l = n.type === "JSXElement" ? n.openingElement : n.openingFragment, { attributes: u = [] } = l, d = n.type === "JSXElement" ? this.#L(l.name) : "", f = (this.props.blacklistedAttrs || []).map((e) => e instanceof RegExp ? e : new RegExp(e, "i")), p = (this.props.blacklistedTags || []).map((e) => e.trim().toLowerCase()).filter(Boolean);
+		if (/^(html|head|body)$/i.test(d)) return c.map((e) => this.#R(e, r));
 		let m = d.trim().toLowerCase();
-		if (p.indexOf(m) !== -1) return s(this.#k("blacklisted-tag", `The tag \`<${d}>\` is blacklisted, and will not be rendered.`, n, /* @__PURE__ */ Error(`The tag <${d}> is blacklisted.`))), null;
-		if (d !== "" && !yn(a, d)) {
-			if (o) return s(this.#k("unrecognized-component", `The component \`<${d}>\` is unrecognized, and will not be rendered.`, n, /* @__PURE__ */ ReferenceError(`The component <${d}> is not defined.`))), this.props.renderUnrecognized(d);
-			if (!i && document.createElement(d) instanceof HTMLUnknownElement) return s(this.#k("unrecognized-tag", `The tag \`<${d}>\` is unrecognized in this browser, and will not be rendered.`, n, /* @__PURE__ */ ReferenceError(`The tag <${d}> is not a recognized element.`))), this.props.renderUnrecognized(d);
+		if (p.indexOf(m) !== -1) return s(this.#A("blacklisted-tag", `The tag \`<${d}>\` is blacklisted, and will not be rendered.`, n, /* @__PURE__ */ Error(`The tag <${d}> is blacklisted.`))), null;
+		if (d !== "" && !bn(a, d)) {
+			if (o) return s(this.#A("unrecognized-component", `The component \`<${d}>\` is unrecognized, and will not be rendered.`, n, /* @__PURE__ */ ReferenceError(`The component <${d}> is not defined.`))), this.props.renderUnrecognized(d);
+			if (!i && document.createElement(d) instanceof HTMLUnknownElement) return s(this.#A("unrecognized-tag", `The tag \`<${d}>\` is unrecognized in this browser, and will not be rendered.`, n, /* @__PURE__ */ ReferenceError(`The tag <${d}> is not a recognized element.`))), this.props.renderUnrecognized(d);
 		}
-		let h, g = n.type === "JSXElement" ? yn(a, d) : t, _ = this.#m, ee = -1, v = null;
-		_ && (ee = this.#g, this.#g += 1, v = this.#h.length ? this.#h[this.#h.length - 1] : null, this.#h.push(ee)), (g || dn(d)) && (h = c.map((e) => this.#y(e, r)), !g && !fn(d) && (h = h.filter((e) => typeof e != "string" || !/^\s*$/.test(e))), h.length === 0 ? h = void 0 : h.length === 1 ? [h] = h : h.length > 1 && !this.props.disableKeyGeneration && (h = h.map((e, t) => e?.type && !e?.key ? {
+		let h, g = n.type === "JSXElement" ? bn(a, d) : t, _ = this.#m, ee = -1, v = null;
+		_ && (ee = this.#g, this.#g += 1, v = this.#h.length ? this.#h[this.#h.length - 1] : null, this.#h.push(ee)), (g || fn(d)) && (h = c.map((e) => this.#y(e, r)), !g && !pn(d) && (h = h.filter((e) => typeof e != "string" || !/^\s*$/.test(e))), h.length === 0 ? h = void 0 : h.length === 1 ? [h] = h : h.length > 1 && !this.props.disableKeyGeneration && (h = h.map((e, t) => e?.type && !e?.key ? {
 			...e,
 			key: e.key || t
 		} : e))), _ && this.#h.pop();
-		let y = { key: this.props.disableKeyGeneration ? void 0 : mn() };
+		let y = { key: this.props.disableKeyGeneration ? void 0 : hn() };
 		u.forEach((e) => {
 			if (e.type === "JSXAttribute") {
-				let t = e.name.name, n = cn[t] || t, i = this.#y(e, r), a = e.value?.type === "JSXExpressionContainer" ? e.value.expression : void 0, o = this.#E(a);
-				typeof i == "function" && o && r && o in r && (i = this.#D(i, e)), f.filter((e) => e.test(n)).length === 0 && (y[n] = i);
+				let t = e.name.name, n = ln[t] || t, i = this.#y(e, r), a = e.value?.type === "JSXExpressionContainer" ? e.value.expression : void 0, o = this.#D(a);
+				typeof i == "function" && o && r && o in r && (i = this.#O(i, e)), f.filter((e) => e.test(n)).length === 0 && (y[n] = i);
 			} else if (e.type === "JSXSpreadAttribute") {
 				let t = e.argument, n = this.#y(t, r);
 				typeof n == "object" && Object.keys(n || {}).forEach((e) => {
-					let t = cn[e] || e;
+					let t = ln[e] || e;
 					f.filter((e) => e.test(t)).length === 0 && (y[t] = n[e]);
 				});
 			}
-		}), typeof y.style == "string" && (y.style = gn(y.style)), g && g.injectSourceInfo && (y.sourceInfo = this.#O(n));
+		}), typeof y.style == "string" && (y.style = _n(y.style)), g && g.injectSourceInfo && (y.sourceInfo = this.#k(n));
 		let b = d.toLowerCase();
 		b === "option" && (h = h.props.children);
 		let te = e.createElement(g || b, y, h);
@@ -7854,19 +7859,19 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 			instanceId: ee,
 			parentInstanceId: v,
 			componentName: ne || d || "Fragment",
-			source: this.#x(n),
-			location: Yt(this.#e || this.jsx, n.start - this.#t, n.end - this.#t),
-			loopIndex: this.#C()
+			source: this.#S(n),
+			location: Xt(this.#e || this.jsx, n.start - this.#t, n.end - this.#t),
+			loopIndex: this.#w()
 		};
 		return e.createElement(e.Profiler, {
 			id: x.componentName,
 			key: y.key,
 			onRender: (e, t, n, r, i, a) => {
-				this.#j(x, t, n, r, i, a);
+				this.#M(x, t, n, r, i, a);
 			}
 		}, te);
 	};
-	#R = (e, t, n) => {
+	#z = (e, t, n) => {
 		let r = e ?? {};
 		return t.params.forEach((t, i) => {
 			switch (t.type) {
@@ -7894,18 +7899,18 @@ var xn = 6, Sn = e.createContext(null), Cn = class i extends e.Component {
 		}), r;
 	};
 	render = () => {
-		this.ParsedChildren = this.#A();
+		this.ParsedChildren = this.#j();
 		let e = [.../* @__PURE__ */ new Set(["jsx-parser", ...String(this.props.className).split(" ")])].filter(Boolean).join(" "), t = this.props.renderInWrapper ? /* @__PURE__ */ r("div", {
 			className: e,
 			children: this.ParsedChildren
 		}) : /* @__PURE__ */ r(n, { children: this.ParsedChildren });
-		return this.props.onProfile ? /* @__PURE__ */ r(Sn.Provider, {
+		return this.props.onProfile ? /* @__PURE__ */ r(Cn.Provider, {
 			value: this.#f,
 			children: t
 		}) : t;
 	};
 };
 //#endregion
-export { Gt as JsxParserError, Cn as default };
+export { Gt as JsxParserError, wn as default };
 
 //# sourceMappingURL=react-jsx-parser.js.map

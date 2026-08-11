@@ -26,6 +26,7 @@ export declare class JsxParserError extends Error {
     });
 }
 export declare function trimExcessLeadingWhitespaceFromCodeLines(lines: string[]): string[];
+export declare function trimExcessLeadingWhitespaceFromSource(source: string): string;
 export declare function getLocationFromOffsets(source: string, start: number, end: number): SourceLocation;
 export declare function buildErrorFromOffsets({ type, message, source, start, end, fileName, cause, astNode, loopIndex }: {
     type: JsxParserErrorType;
