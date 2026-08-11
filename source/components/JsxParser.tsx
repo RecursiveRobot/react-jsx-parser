@@ -3,7 +3,7 @@ import * as Acorn from 'acorn'
 import * as AcornJSX from 'acorn-jsx'
 import React, { Fragment, ComponentType, ExoticComponent } from 'react'
 import { transpileFunctionBody, isSpreadElement, constructFunction } from '../helpers/functionUtilities'
-import { JsxParserError, SourceInfo, SourceLocation, buildErrorFromOffsets, getLocationFromOffsets, sanitizeHtml } from '../helpers/errorUtilities'
+import { JsxParserError, SourceInfo, SourceLocation, buildErrorFromOffsets, getLocationFromOffsets, sanitizeHtml, trimExcessLeadingWhitespaceFromSource } from '../helpers/errorUtilities'
 import { ProfileData, ProfilerNodeTiming, ProfilerSession } from '../helpers/profilerUtilities'
 import ATTRIBUTES from '../constants/attributeNames'
 import { canHaveChildren, canHaveWhitespace } from '../constants/specialTags'
@@ -172,6 +172,13 @@ export default class JsxParser extends React.Component<TProps> {
 	#getRawTextForExpression: (expression: AcornJSX.Expression) => string =
 		(e: AcornJSX.Expression) => this.jsx.slice(e.start, e.end)
 
+	// The raw expression text, de-indented for profiling `source` values: the first line is
+	// already flush-left (it begins mid-line at the node's start offset), so only the trailing
+	// lines' common leading whitespace is stripped.  Kept separate from `#getRawTextForExpression`
+	// so its non-profiling callers (`sourceInfo`, errors, function transpilation) keep raw text.
+	#getProfileSourceForExpression: (expression: AcornJSX.Expression) => string =
+		(e: AcornJSX.Expression) => trimExcessLeadingWhitespaceFromSource(this.#getRawTextForExpression(e))
+
 	#getErrorFriendlyTextForExpression: (expression: AcornJSX.Expression) => string =
 		(e: AcornJSX.Expression) => {
 			const sanitizedText = this.#getRawTextForExpression(e).replaceAll('`', '\\`')
@@ -256,7 +263,7 @@ export default class JsxParser extends React.Component<TProps> {
 										sourceExpression.start - this.#offsetDelta,
 										sourceExpression.end - this.#offsetDelta,
 									),
-									source: this.#getRawTextForExpression(sourceExpression),
+									source: this.#getProfileSourceForExpression(sourceExpression),
 									// Read before the pop below: the top of the stack is this invocation's index.
 									loopIndex: this.#currentLoopIndex(),
 								},
@@ -605,7 +612,7 @@ export default class JsxParser extends React.Component<TProps> {
 		} finally {
 			profiler.exit(frame, {
 				nodeType: expression.type,
-				source: this.#getRawTextForExpression(expression),
+				source: this.#getProfileSourceForExpression(expression),
 				location: getLocationFromOffsets(
 					this.#userJsx || this.jsx,
 					expression.start - this.#offsetDelta,
@@ -1125,7 +1132,7 @@ export default class JsxParser extends React.Component<TProps> {
 			instanceId: reactInstanceId,
 			parentInstanceId: reactParentInstanceId,
 			componentName: customName || name || 'Fragment',
-			source: this.#getRawTextForExpression(element),
+			source: this.#getProfileSourceForExpression(element),
 			location: getLocationFromOffsets(
 				this.#userJsx || this.jsx,
 				element.start - this.#offsetDelta,

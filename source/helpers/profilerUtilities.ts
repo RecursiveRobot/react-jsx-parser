@@ -13,7 +13,9 @@ export interface ProfilerNodeTiming {
 	depth: number
 	/// The AST node type, e.g. `'JSXElement'`, `'CallExpression'`.
 	nodeType: string
-	/// The raw source text of the node.
+	/// The node's source text.  Lines after the first are de-indented (their common leading
+	/// whitespace removed), so it reads cleanly rather than carrying the template's original
+	/// indentation — it is therefore not a byte-exact slice of the source at `location`.
 	source: string
 	/// The node's position within the consumer's original (unwrapped) source.
 	location: SourceLocation
@@ -76,7 +78,8 @@ export interface ProfileData {
 	callback?: {
 		/// The originating function's position within the consumer's source.
 		location: SourceLocation
-		/// The originating function's raw source text.
+		/// The originating function's source text, with lines after the first de-indented
+		/// (their common leading whitespace removed) — see `ProfilerNodeTiming.source`.
 		source: string
 		/// Which host invocation drove this call (`0`, `1`, `2`, …).
 		loopIndex: number | undefined

@@ -106,6 +106,17 @@ export function trimExcessLeadingWhitespaceFromCodeLines(lines: string[]): strin
 	return lines.map(line => line.replace(new RegExp(`^\\s{${minLeadingWhitespace ?? 0}}`), ''))
 }
 
+/// Trims the common leading whitespace shared by every line *after the first*.  A
+/// profiling `source` value begins mid-line at the node's start offset, so its first
+/// line is already flush-left; only the trailing lines carry the template's original
+/// indentation.  The first line is preserved verbatim; single-line sources are returned
+/// unchanged.
+export function trimExcessLeadingWhitespaceFromSource(source: string): string {
+	const [first, ...rest] = source.split('\n')
+	if (!rest.length) return source
+	return [first, ...trimExcessLeadingWhitespaceFromCodeLines(rest)].join('\n')
+}
+
 /// Builds the framed, `>>> `-highlighted code snippet for the given (1-based) target
 /// line, including up to 2 lines of context on each side.
 function buildSnippet(lines: string[], targetLine: number): string {

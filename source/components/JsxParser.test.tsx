@@ -3083,6 +3083,40 @@ describe('JsxParser Component', () => {
 			expect(callbackBatches.map(b => b.callback.loopIndex).sort()).toEqual([0, 1, 2])
 		})
 
+		test('de-indents a multi-line node `source`, preserving its first line', () => {
+			const onProfile = vi.fn()
+			const jsx = [
+				'<ul>{items.map(x =>',
+				'            <li>',
+				'                {x}',
+				'            </li>',
+				'        )}</ul>',
+			].join('\n')
+			render(<JsxParser jsx={jsx} bindings={{ items: ['a'] }} onProfile={onProfile} />)
+
+			const [batch] = batches(onProfile).filter(b => b.trigger === 'render')
+			const li = batch.nodes.find(n => n.source.startsWith('<li>'))
+			// First line flush-left already; trailing lines de-indented by their common (12-space) indent.
+			expect(li.source).toBe('<li>\n    {x}\n</li>')
+		})
+
+		test('de-indents a multi-line callback `source`, preserving its first line', () => {
+			const onProfile = vi.fn()
+			const jsx = [
+				'<List items={rows} renderRow={row =>',
+				'            <b>',
+				'                {row}',
+				'            </b>',
+				'        } />',
+			].join('\n')
+			render(<JsxParser jsx={jsx} components={{ List }} bindings={{ rows: ['x'] }} onProfile={onProfile} />)
+
+			const [callbackBatch] = batches(onProfile).filter(b => b.trigger === 'callback')
+			// `row =>` is the (preserved) first line; the trailing lines share a 12-space indent, so
+			// `<b>`/`</b>` land flush-left and `{row}` keeps its extra 4-space nesting.
+			expect(callbackBatch.callback.source).toBe('row =>\n<b>\n    {row}\n</b>')
+		})
+
 		test('suppresses lazy callbacks that build no nodes', () => {
 			const onProfile = vi.fn()
 			const report = vi.fn()
