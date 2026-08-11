@@ -36,6 +36,22 @@ export type TProps = {
 }
 type Scope = Record<string, any>
 
+// Result of `#resolveElement`: either an early-return value (blacklisted tag, unrecognized
+// component/tag, or an `html`/`head`/`body` wrapper whose children are unwrapped) or the resolved
+// fields the two `#parseElement` variants (`#renderElement`/`#profileElement`) build the element from.
+type ElementResolution =
+	| { done: true, value: React.JSX.Element | React.JSX.Element[] | null }
+	| {
+		done: false,
+		name: string,
+		component: ComponentType | ExoticComponent | typeof Fragment | undefined,
+		childNodes: any[],
+		attributes: any[],
+		blacklistedAttrs: RegExp[],
+	}
+// The resolved (renderable) case of `ElementResolution`, shared by the element sub-step helpers.
+type ResolvedElement = Extract<ElementResolution, { done: false }>
+
 // Captured when a profiled custom component's element is built, carried in that component's
 // `React.Profiler` onRender closure, and combined with the commit-phase timings on flush.
 // `instanceId`/`parentInstanceId` reconstruct exact per-instance React nesting (see `#parseElement`).
@@ -168,6 +184,19 @@ export default class JsxParser extends React.Component<TProps> {
 	// (profiling off) or `#profileIterationIndex` (profiling on).  Keeps the per-invocation `apply`
 	// trap free of profiling checks on the common path.  Always assigned before the walk uses it.
 	#trackIteration!: <T extends Function>(fn: T, sourceExpression?: AcornJSX.Expression) => T
+
+	// Reassignable per-element dispatch target.  `#parseElement` is called for EVERY rendered element,
+	// so it is effectively hot path.  Its only profiling concern is React-render bookkeeping
+	// (instance-id/parent-stack + `React.Profiler` wrap) — parser timing is handled upstream by
+	// `#parseExpression`.  Bound once per render (in `#parseJSX`) — and per sub-parser in the block-body
+	// share block — at either `#renderElement` (React-render profiling off: the original walk, no
+	// bookkeeping) or `#profileElement` (on).  Gated on `#reactProfilingOn`, NOT `onProfile`, so the
+	// "parser profiling on but `profileReactRender` off" state stays on the plain path.  Always assigned
+	// before the walk uses it.
+	#parseElement!: (
+		element: AcornJSX.JSXElement | AcornJSX.JSXFragment,
+		scope?: Scope,
+	) => React.JSX.Element | React.JSX.Element[] | null
 
 	#getRawTextForExpression: (expression: AcornJSX.Expression) => string =
 		(e: AcornJSX.Expression) => this.jsx.slice(e.start, e.end)
@@ -450,6 +479,10 @@ export default class JsxParser extends React.Component<TProps> {
 			// React-render profiling is a distinct opt-in on top of parser profiling: it modifies the
 			// element tree (Profiler wrappers) and only reports under a dev/profiling React build.
 			this.#reactProfilingOn = this.props.profileReactRender === true
+			// `#parseElement` only ever does React-render bookkeeping, so it is gated on
+			// `#reactProfilingOn` — NOT `onProfile`.  With parser profiling on but `profileReactRender`
+			// off, the per-element path stays plain.
+			this.#parseElement = this.#reactProfilingOn ? this.#profileElement : this.#renderElement
 			this.#profiler.begin()
 			const start = this.#profiler.now()
 			const result = parsed.map(p => this.#parseExpression(p)).filter(Boolean)
@@ -472,6 +505,7 @@ export default class JsxParser extends React.Component<TProps> {
 		this.#reactProfilingOn = false
 		this.#parseExpression = this.#evaluateExpression
 		this.#trackIteration = this.#trackIterationIndex
+		this.#parseElement = this.#renderElement
 		return parsed.map(p => this.#parseExpression(p)).filter(Boolean)
 	}
 
@@ -725,6 +759,12 @@ export default class JsxParser extends React.Component<TProps> {
 							// keeps its own react parent-stack/buffer and flushes its own `'react'` batch.
 							elementParser.#reactProfilingOn = this.#reactProfilingOn
 							elementParser.#profileCycleId = this.#profileCycleId
+							// The sub-parser's `#parseJSX` never runs, so bind its per-element dispatch here
+							// too — to `#profileElement` when React-render profiling is on (matching the
+							// gate in `#parseJSX`), otherwise the plain `#renderElement`.
+							elementParser.#parseElement = this.#reactProfilingOn
+								? elementParser.#profileElement
+								: elementParser.#renderElement
 							return elementParser.#parseExpression(elementExpression, elementScope)
 						},
 						mapBodyOffsetToSource,
@@ -954,10 +994,16 @@ export default class JsxParser extends React.Component<TProps> {
 		return `${this.#parseName(element.object)}.${this.#parseName(element.property)}`
 	}
 
-	#parseElement = (
+	// Resolves an element's identity and validity: parses its name, resolves the component, and
+	// applies the blacklist/`componentsOnly`/`allowUnknownElements` rules.  Returns `{ done: true }`
+	// with the value to return for the cases that short-circuit before rendering (an
+	// `html`/`head`/`body` wrapper whose children are unwrapped, a blacklisted tag, or an
+	// unrecognized component/tag), or `{ done: false }` with the fields the two `#parseElement`
+	// variants build the element from.  Shared verbatim by `#renderElement` and `#profileElement`.
+	#resolveElement = (
 		element: AcornJSX.JSXElement | AcornJSX.JSXFragment,
 		scope?: Scope,
-	): React.JSX.Element | React.JSX.Element[] | null => {
+	): ElementResolution => {
 		const { allowUnknownElements, components, componentsOnly, onError } = this.props
 		const { children: childNodes = [] } = element
 		const openingTag = element.type === 'JSXElement'
@@ -974,7 +1020,7 @@ export default class JsxParser extends React.Component<TProps> {
 			.map(tag => tag.trim().toLowerCase()).filter(Boolean)
 
 		if (/^(html|head|body)$/i.test(name)) {
-			return childNodes.map(c => this.#parseElement(c, scope)) as React.JSX.Element[]
+			return { done: true, value: childNodes.map(c => this.#parseElement(c, scope)) as React.JSX.Element[] }
 		}
 		const tagName = name.trim().toLowerCase()
 		if (blacklistedTags.indexOf(tagName) !== -1) {
@@ -984,7 +1030,7 @@ export default class JsxParser extends React.Component<TProps> {
 				element,
 				new Error(`The tag <${name}> is blacklisted.`),
 			))
-			return null
+			return { done: true, value: null }
 		}
 
 		if (name !== '' && !resolvePath(components, name)) {
@@ -995,7 +1041,7 @@ export default class JsxParser extends React.Component<TProps> {
 					element,
 					new ReferenceError(`The component <${name}> is not defined.`),
 				))
-				return this.props.renderUnrecognized!(name)
+				return { done: true, value: this.props.renderUnrecognized!(name) }
 			}
 
 			if (!allowUnknownElements && document.createElement(name) instanceof HTMLUnknownElement) {
@@ -1005,31 +1051,23 @@ export default class JsxParser extends React.Component<TProps> {
 					element,
 					new ReferenceError(`The tag <${name}> is not a recognized element.`),
 				))
-				return this.props.renderUnrecognized!(name)
+				return { done: true, value: this.props.renderUnrecognized!(name) }
 			}
 		}
 
-		let children
 		const component = element.type === 'JSXElement'
 			? resolvePath(components, name)
 			: Fragment
+		return { done: false, name, component, childNodes, attributes, blacklistedAttrs }
+	}
 
-		// React-render profiling wraps EVERY rendered element — host tags, custom components, and
-		// fragments — so the timing tree has no gaps.  Allocate this element's instance id and read its
-		// enclosing profiled element *before* parsing children, so nested elements pick this up as
-		// their parent — reconstructing exact React nesting even across `.map()`-looped instances.
-		const isProfiledElement = this.#reactProfilingOn
-		let reactInstanceId = -1
-		let reactParentInstanceId: number | null = null
-		if (isProfiledElement) {
-			reactInstanceId = this.#reactInstanceSeq
-			this.#reactInstanceSeq += 1
-			reactParentInstanceId = this.#reactParentStack.length
-				? this.#reactParentStack[this.#reactParentStack.length - 1]
-				: null
-			this.#reactParentStack.push(reactInstanceId)
-		}
-
+	// Parses and normalizes an element's children (whitespace filtering for host tags, single-child
+	// unwrapping, and key generation for multi-child lists).  Shared by both `#parseElement` variants;
+	// carries no profiling logic — the profiling variant brackets the CALL to this with its
+	// parent-stack push/pop so nested elements resolve their React parent correctly.
+	#parseElementChildren = (resolved: ResolvedElement, scope?: Scope): any => {
+		const { component, name, childNodes } = resolved
+		let children
 		if (component || canHaveChildren(name)) {
 			children = childNodes.map(node => this.#parseExpression(node, scope))
 			if (!component && !canHaveWhitespace(name)) {
@@ -1050,10 +1088,18 @@ export default class JsxParser extends React.Component<TProps> {
 				))
 			}
 		}
+		return children
+	}
 
-		// Children are built; this element is no longer the enclosing parent for what follows.
-		if (isProfiledElement) this.#reactParentStack.pop()
-
+	// Builds an element's props: parses each attribute (honouring the attribute blacklist and
+	// wrapping scoped callbacks), normalizes `style`, and injects `sourceInfo` into opted-in
+	// components.  Shared by both `#parseElement` variants; carries no profiling logic.
+	#buildElementProps = (
+		resolved: ResolvedElement,
+		element: AcornJSX.JSXElement | AcornJSX.JSXFragment,
+		scope?: Scope,
+	): { [key: string]: any } => {
+		const { attributes, blacklistedAttrs, component } = resolved
 		const props: { [key: string]: any } = {
 			key: this.props.disableKeyGeneration ? undefined : randomHash(),
 		}
@@ -1109,20 +1155,73 @@ export default class JsxParser extends React.Component<TProps> {
 		if (component && (component as { injectSourceInfo?: unknown }).injectSourceInfo) {
 			props.sourceInfo = this.#buildSourceInfo(element)
 		}
+		return props
+	}
 
-		const lowerName = name.toLowerCase()
-		if (lowerName === 'option') {
-			children = children.props.children
-		}
+	// Applies the `<option>` single-child special-case and creates the React element.  Shared so both
+	// `#parseElement` variants produce the identical `rendered` element (the profiling variant wraps
+	// the result in a `React.Profiler`).
+	#finishElement = (
+		resolved: ResolvedElement,
+		children: any,
+		props: { [key: string]: any },
+	): React.JSX.Element => {
+		const lowerName = resolved.name.toLowerCase()
+		const finalChildren = lowerName === 'option' ? children.props.children : children
+		return React.createElement(resolved.component || lowerName, props, finalChildren)
+	}
 
-		const rendered = React.createElement(component || lowerName, props, children)
-		if (!isProfiledElement) return rendered
+	// The plain per-element variant (React-render profiling off): resolve → children → props →
+	// create.  Bound to `#parseElement` when `#reactProfilingOn` is false — byte-for-byte the original
+	// walk with no instance-id/parent-stack bookkeeping and no `React.Profiler` wrap.
+	#renderElement = (
+		element: AcornJSX.JSXElement | AcornJSX.JSXFragment,
+		scope?: Scope,
+	): React.JSX.Element | React.JSX.Element[] | null => {
+		const resolved = this.#resolveElement(element, scope)
+		if (resolved.done) return resolved.value
+		const children = this.#parseElementChildren(resolved, scope)
+		const props = this.#buildElementProps(resolved, element, scope)
+		return this.#finishElement(resolved, children, props)
+	}
+
+	// The React-render profiling variant (bound only when `#reactProfilingOn` is true).  Identical to
+	// `#renderElement` except it reconstructs exact React nesting and wraps every rendered element in a
+	// transparent `React.Profiler`.
+	#profileElement = (
+		element: AcornJSX.JSXElement | AcornJSX.JSXFragment,
+		scope?: Scope,
+	): React.JSX.Element | React.JSX.Element[] | null => {
+		const resolved = this.#resolveElement(element, scope)
+		// Early-return elements (html/head/body unwrap, blacklisted, unrecognized) are not profiled
+		// nodes — they consume no instance id and are not wrapped, exactly as on the plain path.
+		if (resolved.done) return resolved.value
+
+		// React-render profiling wraps EVERY rendered element — host tags, custom components, and
+		// fragments — so the timing tree has no gaps.  Allocate this element's instance id and read its
+		// enclosing profiled element *before* parsing children, so nested elements pick this up as
+		// their parent — reconstructing exact React nesting even across `.map()`-looped instances.
+		const reactInstanceId = this.#reactInstanceSeq
+		this.#reactInstanceSeq += 1
+		const reactParentInstanceId = this.#reactParentStack.length
+			? this.#reactParentStack[this.#reactParentStack.length - 1]
+			: null
+		this.#reactParentStack.push(reactInstanceId)
+
+		const children = this.#parseElementChildren(resolved, scope)
+
+		// Children are built; this element is no longer the enclosing parent for what follows.
+		this.#reactParentStack.pop()
+
+		const props = this.#buildElementProps(resolved, element, scope)
+		const rendered = this.#finishElement(resolved, children, props)
 
 		// Wrap the element in a transparent `React.Profiler` (no DOM node).  The Profiler carries the
 		// `key`, so list reconciliation and the multi-child key pass above keep working.  Its onRender
 		// closure captures this element's `meta`; commit-phase timings are collected + flushed as a
 		// `'react'` batch.  `element` is the AST node — its offsets map to the user's source.
 		// Label: a custom component's display name; else the host tag name; else `'Fragment'`.
+		const { name, component } = resolved
 		const customName = component && component !== Fragment
 			? (component as { displayName?: string, name?: string }).displayName
 				|| (component as { name?: string }).name
