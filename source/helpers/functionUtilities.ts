@@ -251,10 +251,13 @@ export function transpileFunctionBody(
 	mapBodyOffsetToSource: (bodyOffset: number) => number = bodyOffset => bodyOffset,
 ): [string, Record<string, any>] {
 	const renderFunctions: Record<string, any> = {}
-	const replacements: [string, string][] = []
+	const replacements: [number, number, string][] = []
 
-	// For each JSX element, calculate the replacement string and render function...
-	const jsxElements = getAllJsxElements(body)
+	// For each JSX element, calculate the replacement string and render function.  Sorted by
+	// start offset so wrapper names follow source order and the reverse splice below is safe
+	// (the elements are top level only — `getAllJsxElements` does not descend into a found
+	// element — so their ranges never overlap).
+	const jsxElements = getAllJsxElements(body).sort((a, b) => a.start - b.start)
 	jsxElements.forEach((element, index) => {
 		const renderFunctionName = `renderJSXElementWrapper_${index}`
 		const renderFunction = getRenderFunction(
@@ -270,19 +273,26 @@ export function transpileFunctionBody(
 		const elementText = body.slice(element.start, element.end)
 		const extraLines = elementText.split('\n').length - 1
 		replacements.push([
-			elementText,
+			element.start,
+			element.end,
 			`__jsxRenderContext__.${renderFunctionName}({ ${getClosureBindings(element).join(', ')} })${'\n'.repeat(extraLines)}`,
 		])
 	})
 
 	if (!replacements.length) return [body, {}]
 
-	// Prepend the render function context to the body...
-	let newBody = `{${RENDER_CONTEXT_PREAMBLE}${body.slice(1)}`
-	// Replace the JSX expressions with their render function calls...
-	replacements.forEach(([expression, renderCall]) => {
-		newBody = newBody.replace(expression, renderCall)
-	})
+	// Replace each JSX expression with its render function call AT ITS KNOWN OFFSETS, last to
+	// first so earlier offsets stay valid.  (A text-based `String.replace` would match the
+	// first occurrence of the element's text anywhere in the body — e.g. inside an earlier
+	// string literal — and corrupt the code.)
+	let newBody = body
+	for (let i = replacements.length - 1; i >= 0; i -= 1) {
+		const [start, end, renderCall] = replacements[i]
+		newBody = newBody.slice(0, start) + renderCall + newBody.slice(end)
+	}
+	// Prepend the render function context to the body (after the splices — the offsets above
+	// index the original, unshifted body)...
+	newBody = `{${RENDER_CONTEXT_PREAMBLE}${newBody.slice(1)}`
 	return [newBody, renderFunctions]
 }
 

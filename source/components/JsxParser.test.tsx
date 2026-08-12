@@ -2398,6 +2398,23 @@ describe('JsxParser Component', () => {
 			expect(html).toMatch('<div class="foo"><span>One: 6<span>#1</span></span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span><span>qux: 20</span><span>Date: 2024-10-31</span></div><div class="foo"><span>Two: 7<span>#2</span></span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span><span>qux: 20</span><span>Date: 2024-10-31</span></div><div class="foo"><span>Three: 8<span>#3</span></span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span><span>qux: 20</span><span>Date: 2024-10-31</span></div><div class="foo"><span>Four: 9<span>#4</span></span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span><span>qux: 20</span><span>Date: 2024-10-31</span></div><div class="foo"><span>Five: 10<span>#5</span></span><span>foo: 5</span><span>bar: 10</span><span>baz: 15</span><span>qux: 20</span><span>Date: 2024-10-31</span></div>')
 		})
 
+		it('renders JSX whose text also appears in an earlier string literal', () => {
+			const onError = vi.fn()
+			const jsx = `{
+				(() => {
+					const s = '<b>x</b>';
+					return <b>x</b>;
+				})()
+			}`
+			// Regression: the transpiler replaces JSX at its source offsets — a text-based
+			// replacement would corrupt the string literal and fail to compile this body.
+			const { html } = render(
+				<JsxParser renderInWrapper={false} onError={onError} jsx={jsx} />,
+			)
+			expect(onError).not.toHaveBeenCalled()
+			expect(html).toEqual('<b>x</b>')
+		})
+
 		it('invokes the provided onError handler when an exception occurs within a block-bodied function', () => {
 			const jsx = `<span>{
 				((input) => {

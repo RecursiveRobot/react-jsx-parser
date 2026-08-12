@@ -1,6 +1,36 @@
 import * as Acorn from 'acorn'
 import * as AcornJSX from 'acorn-jsx'
-import { getAllJsxElements, getClosureBindings, constructFunction, getRenderFunction } from './functionUtilities'
+import { getAllJsxElements, getClosureBindings, constructFunction, getRenderFunction, transpileFunctionBody } from './functionUtilities'
+
+describe('transpileFunctionBody', () => {
+	it('replaces JSX at its offsets, not at an earlier matching string literal', () => {
+		const body = "{ const s = '<b>x</b>';\n\treturn <b>x</b>; }"
+		const [transpiled] = transpileFunctionBody(body, () => null)
+
+		// The string literal is untouched; only the actual JSX became a render call.
+		expect(transpiled).toContain("const s = '<b>x</b>'")
+		expect(transpiled).toMatch(/return __jsxRenderContext__\.renderJSXElementWrapper_0\(/)
+		expect(transpiled.match(/renderJSXElementWrapper_0/g)).toHaveLength(1)
+		expect(transpiled).not.toContain('return <b>x</b>')
+	})
+	it('replaces duplicate identical elements each at their own position, in source order', () => {
+		const body = '{ const a = <b>x</b>; const c = <b>x</b>; return <div></div>; }'
+		const [transpiled, renderFunctions] = transpileFunctionBody(body, () => null)
+
+		expect(transpiled).toMatch(/const a = __jsxRenderContext__\.renderJSXElementWrapper_0\(/)
+		expect(transpiled).toMatch(/const c = __jsxRenderContext__\.renderJSXElementWrapper_1\(/)
+		expect(transpiled).toMatch(/return __jsxRenderContext__\.renderJSXElementWrapper_2\(/)
+		expect(Object.keys(renderFunctions)).toHaveLength(3)
+	})
+	it('preserves the body line count (plus the injected preamble line)', () => {
+		const body = '{\n\treturn <div>\n\t\t<span>hi</span>\n\t</div>;\n}'
+		const [transpiled] = transpileFunctionBody(body, () => null)
+
+		// The multi-line element collapses onto one line but is newline-padded back; the only
+		// added line is the render-context preamble (absorbed by `constructFunction`'s offset math).
+		expect(transpiled.split('\n')).toHaveLength(body.split('\n').length + 1)
+	})
+})
 
 describe('getRenderFunction', () => {
 	it('reads bindings from its call-time `this` rather than freezing them', () => {
