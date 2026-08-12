@@ -2988,6 +2988,281 @@ describe('JsxParser Component', () => {
 		})
 	})
 
+	describe('function caching', () => {
+		// Block-bodied arrows build additional Acorn parsers via `Acorn.Parser.extend` (once for
+		// the body, once per embedded JSX element), so — together with the top-level parse — the
+		// extend count measures whether the function compile pipeline ran at all.
+		let extendSpy
+		beforeEach(() => {
+			extendSpy = vi.spyOn(Acorn.Parser, 'extend')
+		})
+		afterEach(() => {
+			extendSpy.mockRestore()
+		})
+
+		const OptedIn: any = ({ text }) => <div>{text}</div>
+		OptedIn.injectSourceInfo = true
+
+		// Recursively collects opted-in elements in document order (mirrors the sourceInfo suite).
+		const collectOptedIn = (node: any, acc: any[] = []): any[] => {
+			if (Array.isArray(node)) {
+				node.forEach((child: any) => collectOptedIn(child, acc))
+			} else if (React.isValidElement(node)) {
+				if (node.type === OptedIn) acc.push(node)
+				else collectOptedIn((node.props as any).children, acc)
+			}
+			return acc
+		}
+
+		// Invokes its `renderRow` render-prop during its own render — after the walk that built
+		// `renderRow` has returned — i.e. a lazy invocation of the (cached) function.
+		const List = ({ items = [], renderRow }: any) => (
+			<ul>
+				{items.map((item: any, index: number) => (
+					<li key={item}>{renderRow(item, index)}</li>
+				))}
+			</ul>
+		)
+
+		test('does not rebuild block-bodied functions on re-render', () => {
+			const jsx = '{items.map(item => { return <li>{item}</li> })}'
+			const { rerender } = rtlRender(
+				<JsxParser renderInWrapper={false} bindings={{ items: ['a', 'b'] }} jsx={jsx} />,
+				{ container: parent },
+			)
+			// Mount parses the template plus the arrow body and its embedded element.
+			const afterMount = extendSpy.mock.calls.length
+			expect(afterMount).toBeGreaterThan(1)
+			expect(parent.textContent).toBe('ab')
+
+			// Inert re-render: AST cache + function cache hit — no parser builds at all.
+			rerender(<JsxParser renderInWrapper={false} bindings={{ items: ['a', 'b'] }} jsx={jsx} someProp />)
+			expect(extendSpy.mock.calls.length).toBe(afterMount)
+
+			// Changed bindings: the walk re-runs (fresh output) but the compile does not.
+			rerender(<JsxParser renderInWrapper={false} bindings={{ items: ['x', 'y', 'z'] }} jsx={jsx} />)
+			expect(extendSpy.mock.calls.length).toBe(afterMount)
+			expect(parent.textContent).toBe('xyz')
+		})
+
+		test('returns identical function references across inert re-renders', () => {
+			const ref = React.createRef()
+			const ping = vi.fn()
+			const jsx = '<button onClick={() => this.ping()} onBlur={() => { return this.ping() }}>Go</button>'
+			const { rerender } = rtlRender(
+				<JsxParser ref={ref} blacklistedAttrs={[]} bindings={{ ping }} jsx={jsx} />,
+				{ container: parent },
+			)
+			const first = ref.current.ParsedChildren[0].props
+
+			rerender(<JsxParser ref={ref} blacklistedAttrs={[]} bindings={{ ping }} jsx={jsx} someProp />)
+			const second = ref.current.ParsedChildren[0].props
+			// Expression-bodied and block-bodied top-level arrows both keep their identity...
+			expect(second.onClick).toBe(first.onClick)
+			expect(second.onBlur).toBe(first.onBlur)
+			// ...and both still invoke correctly.
+			second.onClick()
+			second.onBlur()
+			expect(ping).toHaveBeenCalledTimes(2)
+		})
+
+		test('refreshes the scope behind a stable reference, so cached functions see current bindings', () => {
+			const ref = React.createRef()
+			const first = vi.fn()
+			const second = vi.fn()
+			const jsx = '<button onClick={() => { return this.handler() }}>Go</button>'
+			const { rerender } = rtlRender(
+				<JsxParser ref={ref} blacklistedAttrs={[]} bindings={{ handler: first }} jsx={jsx} />,
+				{ container: parent },
+			)
+			const mountHandler = ref.current.ParsedChildren[0].props.onClick
+
+			rerender(<JsxParser ref={ref} blacklistedAttrs={[]} bindings={{ handler: second }} jsx={jsx} />)
+			const rerenderHandler = ref.current.ParsedChildren[0].props.onClick
+			expect(rerenderHandler).toBe(mountHandler)
+
+			// The identical reference sees the swapped binding, not the one it was built under.
+			rerenderHandler()
+			expect(second).toHaveBeenCalledTimes(1)
+			expect(first).not.toHaveBeenCalled()
+		})
+
+		test('block-body embedded JSX reflects updated bindings without recompiling', () => {
+			const jsx = '{items.map(item => { return <li>{this.prefix + item}</li> })}'
+			const { rerender } = rtlRender(
+				<JsxParser renderInWrapper={false} bindings={{ items: ['a'], prefix: '1-' }} jsx={jsx} />,
+				{ container: parent },
+			)
+			expect(parent.textContent).toBe('1-a')
+			const afterMount = extendSpy.mock.calls.length
+
+			rerender(<JsxParser renderInWrapper={false} bindings={{ items: ['a'], prefix: '2-' }} jsx={jsx} />)
+			expect(parent.textContent).toBe('2-a')
+			expect(extendSpy.mock.calls.length).toBe(afterMount)
+		})
+
+		test('lets React.memo children skip re-renders via stable function props', () => {
+			const renders = vi.fn()
+			const Memo: any = React.memo(({ onPing }: any) => {
+				renders()
+				return <button type="button" onClick={onPing}>memo</button>
+			})
+			const ping = vi.fn()
+			// Deterministic keys are a separate change (see TODO.md); generated random keys would
+			// remount the child regardless of prop identity, so key generation is disabled here.
+			const jsx = '<Memo onPing={() => this.ping()} />'
+			const { rerender } = rtlRender(
+				<JsxParser components={{ Memo }} blacklistedAttrs={[]} disableKeyGeneration bindings={{ ping }} jsx={jsx} />,
+				{ container: parent },
+			)
+			expect(renders).toHaveBeenCalledTimes(1)
+			// The memoized child actually received the function (not a blacklisted-away prop).
+			expect(parent.querySelector('button')).toBeTruthy()
+
+			rerender(
+				<JsxParser
+					components={{ Memo }}
+					blacklistedAttrs={[]}
+					disableKeyGeneration
+					bindings={{ ping }}
+					jsx={jsx}
+					someProp
+				/>,
+			)
+			// The function prop kept its identity, so the memoized child did not re-render.
+			expect(renders).toHaveBeenCalledTimes(1)
+		})
+
+		test('keeps per-iteration scopes distinct for block-bodied functions built inside loops', () => {
+			const ref = React.createRef()
+			const Btn = ({ onClick }: any) => <button type="button" onClick={onClick}>b</button>
+			const jsx = '{items.map(item => <Btn onClick={() => { return this.item }} />)}'
+			const { rerender } = rtlRender(
+				<JsxParser ref={ref} blacklistedAttrs={[]} components={{ Btn }} bindings={{ items: ['a', 'b'] }} jsx={jsx} />,
+				{ container: parent },
+			)
+			// The inner arrow is one AST node evaluated once per item: the compiled function is
+			// shared (Level 1), but each evaluation's proxy must carry its own iteration scope.
+			const handlers = ref.current.ParsedChildren[0].map((el: any) => el.props.onClick)
+			expect(handlers[0]()).toBe('a')
+			expect(handlers[1]()).toBe('b')
+
+			rerender(<JsxParser ref={ref} blacklistedAttrs={[]} components={{ Btn }} bindings={{ items: ['a', 'b'] }} jsx={jsx} someProp />)
+			const next = ref.current.ParsedChildren[0].map((el: any) => el.props.onClick)
+			expect(next[0]()).toBe('a')
+			expect(next[1]()).toBe('b')
+		})
+
+		test('keeps per-iteration scopes distinct for expression-bodied functions built inside loops', () => {
+			const ref = React.createRef()
+			const Btn = ({ onClick }: any) => <button type="button" onClick={onClick}>b</button>
+			const jsx = '{items.map(item => <Btn onClick={() => item} />)}'
+			const { rerender } = rtlRender(
+				<JsxParser ref={ref} blacklistedAttrs={[]} components={{ Btn }} bindings={{ items: ['a', 'b'] }} jsx={jsx} />,
+				{ container: parent },
+			)
+			const handlers = ref.current.ParsedChildren[0].map((el: any) => el.props.onClick)
+			expect(handlers[0]()).toBe('a')
+			expect(handlers[1]()).toBe('b')
+
+			rerender(<JsxParser ref={ref} blacklistedAttrs={[]} components={{ Btn }} bindings={{ items: ['a', 'b'] }} jsx={jsx} someProp />)
+			const next = ref.current.ParsedChildren[0].map((el: any) => el.props.onClick)
+			expect(next[0]()).toBe('a')
+			expect(next[1]()).toBe('b')
+		})
+
+		test('resets loop-index tracking on cached functions each render', () => {
+			const ref = React.createRef()
+			const jsx = '{items.map(item => { return <OptedIn text={item} /> })}'
+			const { rerender } = rtlRender(
+				<JsxParser ref={ref} components={{ OptedIn }} bindings={{ items: ['a', 'b'] }} jsx={jsx} />,
+				{ container: parent },
+			)
+			const loopIndexes = () => collectOptedIn(ref.current.ParsedChildren)
+				.map((c: any) => c.props.sourceInfo.loopIndex)
+			expect(loopIndexes()).toEqual([0, 1])
+
+			// The cached wrapper's invocation count must reset per render pass — a count carried
+			// over from the first render would yield [2, 3] here.
+			rerender(<JsxParser ref={ref} components={{ OptedIn }} bindings={{ items: ['a', 'b'] }} jsx={jsx} someProp />)
+			expect(loopIndexes()).toEqual([0, 1])
+		})
+
+		test('resets loop-index tracking for lazily-invoked cached render props', () => {
+			const seen: any[] = []
+			const Recorder: any = ({ text, sourceInfo }: any) => {
+				seen.push(sourceInfo.loopIndex)
+				return <i>{text}</i>
+			}
+			Recorder.injectSourceInfo = true
+			const jsx = '<List items={items} renderRow={(item) => { return <Recorder text={item} /> }} />'
+			const { rerender } = rtlRender(
+				<JsxParser components={{ List, Recorder }} bindings={{ items: ['a', 'b'] }} jsx={jsx} />,
+				{ container: parent },
+			)
+			expect(seen).toEqual([0, 1])
+
+			// The lazy invocations of the second render pass restart at 0 on the cached wrapper.
+			rerender(<JsxParser components={{ List, Recorder }} bindings={{ items: ['a', 'b'] }} jsx={jsx} someProp />)
+			expect(seen).toEqual([0, 1, 0, 1])
+		})
+
+		test('emits callback batches when profiling turns on over cached functions', () => {
+			const onProfile = vi.fn()
+			const jsx = '<List items={items} renderRow={(item) => { return <span>{item}</span> }} />'
+			const { rerender } = rtlRender(
+				<JsxParser components={{ List }} bindings={{ items: ['a'] }} jsx={jsx} />,
+				{ container: parent },
+			)
+
+			// The cached tracking wrapper was built with profiling off; adding `onProfile` must
+			// rebuild it as the profiling variant so lazy invocations open callback batches.
+			rerender(<JsxParser components={{ List }} bindings={{ items: ['a'] }} jsx={jsx} onProfile={onProfile} />)
+			const triggers = onProfile.mock.calls.map(call => call[0].trigger)
+			expect(triggers).toContain('render')
+			expect(triggers).toContain('callback')
+		})
+
+		test('tracks loop indexes correctly after profiling toggles back off', () => {
+			const ref = React.createRef()
+			const onProfile = vi.fn()
+			const jsx = '{items.map(item => { return <OptedIn text={item} /> })}'
+			const { rerender } = rtlRender(
+				<JsxParser ref={ref} components={{ OptedIn }} bindings={{ items: ['a', 'b'] }} jsx={jsx} onProfile={onProfile} />,
+				{ container: parent },
+			)
+			const profiledBatches = onProfile.mock.calls.length
+			expect(profiledBatches).toBeGreaterThan(0)
+
+			// Profiling off: the wrapper is rebuilt as the plain variant — no further batches,
+			// loop indexes still correct.
+			rerender(<JsxParser ref={ref} components={{ OptedIn }} bindings={{ items: ['a', 'b'] }} jsx={jsx} />)
+			expect(onProfile.mock.calls.length).toBe(profiledBatches)
+			expect(collectOptedIn(ref.current.ParsedChildren).map((c: any) => c.props.sourceInfo.loopIndex))
+				.toEqual([0, 1])
+		})
+
+		test('reports runtime errors from cached functions to the current onError handler', () => {
+			const ref = React.createRef()
+			const firstOnError = vi.fn()
+			const secondOnError = vi.fn()
+			const explode = () => { throw new Error('boom') }
+			const jsx = '<button onClick={() => { return this.explode() }}>Go</button>'
+			const { rerender } = rtlRender(
+				<JsxParser ref={ref} blacklistedAttrs={[]} bindings={{ explode }} onError={firstOnError} jsx={jsx} />,
+				{ container: parent },
+			)
+
+			rerender(<JsxParser ref={ref} blacklistedAttrs={[]} bindings={{ explode }} onError={secondOnError} jsx={jsx} />)
+			ref.current.ParsedChildren[0].props.onClick()
+			// The cached function's throw-time reporting reads the CURRENT handler, not the one
+			// captured when it was compiled.
+			expect(firstOnError).not.toHaveBeenCalled()
+			expect(secondOnError).toHaveBeenCalledTimes(1)
+			expect(secondOnError.mock.calls[0][0].type).toBe('function-runtime')
+		})
+	})
+
 	describe('performance profiling', () => {
 		// Invokes its `renderRow` render-prop once per item *during its own render* — i.e. after the
 		// JsxParser walk that built `renderRow` has returned.  Each such call is a lazy invocation.

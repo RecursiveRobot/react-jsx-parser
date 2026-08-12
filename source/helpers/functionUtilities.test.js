@@ -1,6 +1,32 @@
 import * as Acorn from 'acorn'
 import * as AcornJSX from 'acorn-jsx'
-import { getAllJsxElements, getClosureBindings, constructFunction } from './functionUtilities'
+import { getAllJsxElements, getClosureBindings, constructFunction, getRenderFunction } from './functionUtilities'
+
+describe('getRenderFunction', () => {
+	it('reads bindings from its call-time `this` rather than freezing them', () => {
+		const scopes = []
+		const parseExpression = (jsx, expression, scope) => {
+			scopes.push(scope)
+			return scope.foo
+		}
+		const render = getRenderFunction('<span>{foo}</span>', parseExpression)
+		const context = { foo: 1, render }
+
+		expect(context.render({ bar: 2 })).toEqual(1)
+		expect(scopes[0]).toMatchObject({ foo: 1, bar: 2 })
+
+		// Mutating the context after creation is visible on the next call — live, not frozen...
+		context.foo = 42
+		expect(context.render({})).toEqual(42)
+	})
+	it('lets call args shadow context bindings', () => {
+		const parseExpression = (jsx, expression, scope) => scope.foo
+		const render = getRenderFunction('<span>{foo}</span>', parseExpression)
+		const context = { foo: 1, render }
+
+		expect(context.render({ foo: 99 })).toEqual(99)
+	})
+})
 
 describe('getClosureBindings', () => {
 	const parser = Acorn.Parser.extend(AcornJSX.default({
@@ -367,7 +393,7 @@ describe('getAllJsxElements', () => {
 			const prefix = 'AAA\nBBB'
 			const body = 'const line_one = 1;\nthrow new Error("boom");\nconst line_three = 3;'
 			const sourceText = `${prefix}${body}`
-			const func = constructFunction([], body, 'fn', undefined, undefined, o => o + prefix.length, sourceText)
+			const func = constructFunction([], body, 'fn', undefined, o => o + prefix.length, sourceText)
 			try {
 				func()
 			} catch (error) {

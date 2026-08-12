@@ -162,9 +162,17 @@ export function getClosureBindings(fullExpression: AcornJSX.Expression): string[
 /// Returns a function which can be used to render the given JSX.
 /// The JSX is parsed once-off and the resulting function can be called
 /// multiple times (with different bindings, if necessary).
+///
+/// The render function reads its bindings from `this` at CALL time rather than
+/// closing over them: it is only ever invoked as a method on the render context
+/// (`__jsxRenderContext__.renderJSXElementWrapper_N(...)`), so `this` is that
+/// invocation's proxy-merged scope.  This keeps the function (and the parsed
+/// element AST in its closure) cacheable across renders while always seeing the
+/// current bindings.  Note this makes any key of an explicit `fn.call(obj)`
+/// thisArg — and the render-function names themselves — resolvable identifiers
+/// within the embedded JSX; both were already merged onto the proxy scope.
 export function getRenderFunction(
 	jsx: string,
-	bindings: Record<string, any>,
 	parseExpression: (
 		body: string,
 		exp: AcornJSX.Expression,
@@ -177,12 +185,14 @@ export function getRenderFunction(
 		autoCloseVoidElements: true,
 	}))
 	const expression = parser.parse(jsx, { ecmaVersion: 'latest' }) as any
-	return (args: Record<string, any>) => parseExpression(
-		jsx,
-		expression.body[0],
-		{ ...bindings, ...args },
-		sourceBaseOffset,
-	)
+	return function renderJsxElement(this: Record<string, any>, args: Record<string, any>) {
+		return parseExpression(
+			jsx,
+			expression.body[0],
+			{ ...this, ...args },
+			sourceBaseOffset,
+		)
+	}
 }
 
 /// Returns an array of all JSX elements within the given code block.
@@ -230,7 +240,6 @@ export function getAllJsxElements(code: string): (AcornJSX.JSXElement | AcornJSX
 /// This is done by replacing each JSX element expression with an appropriate render function call.
 export function transpileFunctionBody(
 	body: string,
-	bindings: Record<string, any>,
 	parseExpression: (
 		jsx: string,
 		exp: AcornJSX.Expression,
@@ -250,7 +259,6 @@ export function transpileFunctionBody(
 		const renderFunctionName = `renderJSXElementWrapper_${index}`
 		const renderFunction = getRenderFunction(
 			body.slice(element.start, element.end),
-			bindings,
 			parseExpression,
 			mapBodyOffsetToSource(element.start),
 		)
@@ -278,12 +286,20 @@ export function transpileFunctionBody(
 	return [newBody, renderFunctions]
 }
 
+/// Mutable holder for the error-reporting props read at THROW time by functions built via
+/// `constructFunction`.  The constructed function may be cached across renders (see
+/// `#functionCache` in JsxParser) while `onError`/`fileName` are per-render props — the
+/// holder lets the cache owner refresh them without rebuilding the function.
+export type FunctionRuntimeProps = {
+	onError?: (error: JsxParserError) => void,
+	fileName?: string,
+}
+
 export function constructFunction(
 	paramNames: string[],
 	body: string,
 	name: string = 'anonymous',
-	onError?: (error: JsxParserError) => void,
-	fileName?: string,
+	runtime?: FunctionRuntimeProps,
 	// Maps an offset within the ORIGINAL (pre-transpile) block-statement text onto the
 	// consumer's source.  Supplied whenever the body's line structure is preserved (no IIFE
 	// preprocessing); `sourceText` is that original source, needed to slice `sourceInfo.source`
@@ -362,15 +378,15 @@ export function constructFunction(
 				bodyLines: codeLines,
 				line: errorLineNumber,
 				functionName: name,
-				fileName,
+				fileName: runtime?.fileName,
 				cause: error,
 				sourceText: startOffset !== undefined ? sourceText : undefined,
 				startOffset,
 				endOffset,
 			})
 
-			if (onError) {
-				onError(structuredError)
+			if (runtime?.onError) {
+				runtime.onError(structuredError)
 				return undefined
 			}
 

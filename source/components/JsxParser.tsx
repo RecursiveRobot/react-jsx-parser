@@ -2,7 +2,7 @@
 import * as Acorn from 'acorn'
 import * as AcornJSX from 'acorn-jsx'
 import React, { Fragment, ComponentType, ExoticComponent } from 'react'
-import { transpileFunctionBody, isSpreadElement, constructFunction } from '../helpers/functionUtilities'
+import { transpileFunctionBody, isSpreadElement, constructFunction, FunctionRuntimeProps } from '../helpers/functionUtilities'
 import { JsxParserError, SourceInfo, SourceLocation, buildErrorFromOffsets, getLocationFromOffsets, sanitizeHtml, trimExcessLeadingWhitespaceFromSource } from '../helpers/errorUtilities'
 import { ProfileData, ProfilerNodeTiming, ProfilerSession } from '../helpers/profilerUtilities'
 import ATTRIBUTES from '../constants/attributeNames'
@@ -10,7 +10,7 @@ import { canHaveChildren, canHaveWhitespace } from '../constants/specialTags'
 import { randomHash } from '../helpers/hash'
 import { parseStyle } from '../helpers/parseStyle'
 import { resolvePath } from '../helpers/resolvePath'
-import { createFunctionProxy } from '../helpers/functionProxy'
+import { createFunctionProxy, ScopedFunction } from '../helpers/functionProxy'
 
 type ParsedJSX = React.JSX.Element | boolean | string
 type ParsedTree = ParsedJSX | ParsedJSX[] | null
@@ -35,6 +35,25 @@ export type TProps = {
 	renderUnrecognized?: (tagName: string) => React.JSX.Element | null,
 }
 type Scope = Record<string, any>
+
+// Per-AST-node entry of `#functionCache` (see the field for the caching model).  Level-1
+// fields hold the scope-independent compile artifacts of a block-bodied arrow; Level-2
+// fields hold the stable identity chain returned for evaluations with no local `scope`.
+type FunctionCacheEntry = {
+	// Level 1 (block-bodied only): the `constructFunction` result, the mutable holder for
+	// its throw-time error props, and the transpiled body's render functions (which read
+	// bindings from their call-time `this` — see `getRenderFunction`).
+	constructed?: Function,
+	runtime?: FunctionRuntimeProps,
+	renderFunctions?: Record<string, any>,
+	// Level 2: the stable scope proxy (block-bodied; its `.scope` is refreshed per render)
+	// or the raw closure (expression-bodied), plus the `#trackIteration` wrapper around it
+	// and which dispatch variant built that wrapper (rebuilt if the variant changes).
+	stableProxy?: ScopedFunction,
+	invoke?: Function,
+	tracked?: Function,
+	trackVariant?: Function,
+}
 
 // Result of `#resolveElement`: either an early-return value (blacklisted tag, unrecognized
 // component/tag, or an `html`/`head`/`body` wrapper whose children are unwrapped) or the resolved
@@ -144,6 +163,25 @@ export default class JsxParser extends React.Component<TProps> {
 	#cachedWrappedJsx: string = ''
 	#cachedProcessedJsx: string = ''
 
+	// Per-AST-node cache of constructed inline functions (see `FunctionCacheEntry`).  Two levels:
+	// Level 1 (always, block-bodied arrows) caches the scope-independent compile artifacts —
+	// transpiled body, render functions, `new Function` compile — so re-renders never re-run
+	// Acorn or recompile; Level 2 (only when an arrow is evaluated with `scope === undefined`,
+	// i.e. exactly once per render from the top-level walk) additionally caches the full identity
+	// chain (scope proxy + `#trackIteration` wrapper) as a STABLE reference, with only its
+	// attached scope refreshed per render — so downstream `React.memo` components see stable
+	// function props.  Keyed on the arrow's AST node: node identity is stable across `#cachedAst`
+	// hits, and when that cache misses the old nodes (and these entries with them) become
+	// unreachable — the WeakMap needs no manual invalidation.  Failed compiles are never cached,
+	// mirroring the parse-failure rule in `#parseJSX`.  Shared by reference into block-body
+	// sub-parsers (like `#loopIndexStack`) so nested arrows in embedded JSX get Level-1 hits.
+	#functionCache = new WeakMap<AcornJSX.Expression, FunctionCacheEntry>()
+
+	// Monotonic render-pass counter, bumped once per `#parseJSX`.  Cached `#trackIteration`
+	// wrappers stamp this at creation and lazily reset their invocation count when it moves on,
+	// replacing the implicit reset that rebuilding the wrapper every render used to provide.
+	#renderSeq = 0
+
 	// Profiling state.  `#profiler` is non-null only while an `onProfile` prop is supplied; it
 	// persists across the render→lazy-callback boundary within a React render pass (a host may
 	// invoke a render-prop after `#parseJSX` returns) and is shared by reference into the
@@ -234,8 +272,17 @@ export default class JsxParser extends React.Component<TProps> {
 	// mirroring the `#parseExpression`/`#evaluateExpression` split.
 	#trackIterationIndex = <T extends Function>(fn: T): T => {
 		let invocationCount = 0
+		let renderSeq = this.#renderSeq
 		return new Proxy(fn, {
 			apply: (target, thisArg, args) => {
+				// The wrapper may be cached across renders (`#functionCache` Level 2), so the
+				// per-render invocation count resets lazily when the render pass moves on.  Two
+				// field reads + an integer compare PER INVOCATION — the per-node walk stays free
+				// of any such check, preserving the zero-overhead-when-off contract.
+				if (renderSeq !== this.#renderSeq) {
+					renderSeq = this.#renderSeq
+					invocationCount = 0
+				}
 				const index = invocationCount
 				invocationCount += 1
 				this.#loopIndexStack.push(index)
@@ -258,8 +305,14 @@ export default class JsxParser extends React.Component<TProps> {
 	// non-profiling render may have cleared it after this function was constructed.
 	#profileIterationIndex = <T extends Function>(fn: T, sourceExpression?: AcornJSX.Expression): T => {
 		let invocationCount = 0
+		let renderSeq = this.#renderSeq
 		return new Proxy(fn, {
 			apply: (target, thisArg, args) => {
+				// Same lazy per-render reset as `#trackIterationIndex` — see the comment there.
+				if (renderSeq !== this.#renderSeq) {
+					renderSeq = this.#renderSeq
+					invocationCount = 0
+				}
 				const index = invocationCount
 				invocationCount += 1
 				this.#loopIndexStack.push(index)
@@ -404,6 +457,9 @@ export default class JsxParser extends React.Component<TProps> {
 		// loop-index tracking. Cheap, so shared by both branches below.
 		this.#offsetDelta = ROOT_PREFIX_LENGTH
 		this.#loopIndexStack = []
+		// Advancing the render pass lets cached `#trackIteration` wrappers reset their
+		// per-render invocation counts lazily (see `#renderSeq`).
+		this.#renderSeq += 1
 		// React-nesting bookkeeping is per render; resetting here bounds any imbalance (e.g. a throw
 		// mid-walk) to a single render, exactly like `#loopIndexStack` above.
 		this.#reactParentStack = []
@@ -657,6 +713,195 @@ export default class JsxParser extends React.Component<TProps> {
 		}
 	}
 
+	// Evaluates an `ArrowFunctionExpression` into a callable, caching per AST node via
+	// `#functionCache`.  Block-bodied arrows cache the whole compile pipeline (Level 1);
+	// evaluations with no local `scope` additionally return a stable identity (Level 2) whose
+	// attached scope is refreshed instead of rebuilt.  `scope === undefined` is an exact gate
+	// for "evaluated once per render from the top-level walk": every re-evaluation path — an
+	// enclosing arrow's `#getFunctionScope`, a render function's elementScope, a lazy render
+	// prop — carries a defined scope, so per-occurrence evaluations always get their own
+	// proxy (over the shared Level-1 target) and never contaminate each other.
+	#parseArrowFunction = (expression: AcornJSX.ArrowFunctionExpression, scope?: Scope): any => {
+		if (expression.async || expression.generator) {
+			this.props.onError?.(this.#buildError(
+				'unsupported-function',
+				'Async and generator arrow functions are not supported.',
+				expression,
+				new SyntaxError('Async and generator arrow functions are not supported.'),
+			))
+		}
+
+		// Parse function body and construct a Function object
+		if (expression.body.type === 'BlockStatement') {
+			let entry = this.#functionCache.get(expression)
+			if (!entry?.constructed) {
+				const paramNames = expression.params.map((param, index) => {
+					switch (param.type) {
+					case 'Identifier':	return param.name
+					case 'RestElement':	return `...${param.argument.name}`
+					default: return `arg_${index}`
+					}
+				})
+
+				// Anything other than straight pass-through of the function parameters
+				// requires wrapping the function in an IIFE to handle this mapping logic
+				const paramsRequirePreprocessing = expression.params.some(param => param.type !== 'Identifier')
+				// When preprocessing, the body is the original arrow source wrapped in this IIFE
+				// prefix; the JSX within therefore sits `PREPROCESS_PREFIX.length` chars into the
+				// body, after the arrow's own start. Otherwise the body is the raw block statement.
+				const PREPROCESS_PREFIX = '{ return ('
+				const body = paramsRequirePreprocessing ?
+					`${PREPROCESS_PREFIX}${this.#getRawTextForExpression(expression)})(${paramNames.join(', ')}); }` :
+					this.#getRawTextForExpression(expression.body)
+				// Maps an offset within `body` back onto the consumer's original (unwrapped) source,
+				// so block-bodied elements report full-template offsets like everything else.
+				const offsetDelta = this.#offsetDelta
+				const mapBodyOffsetToSource = paramsRequirePreprocessing
+					? (bodyOffset: number) => expression.start + (bodyOffset - PREPROCESS_PREFIX.length) - offsetDelta
+					: (bodyOffset: number) => expression.body.start + bodyOffset - offsetDelta
+				try {
+					// The holder for the error props read at THROW time: refreshed on cache hits
+					// below, so a cached function always reports through the current props.
+					const runtime = {
+						onError: this.props.onError,
+						fileName: this.props.fileName,
+					}
+					// JSX elements cannot be rendered by the vanilla JS runtime, so we need to
+					// transpile them into render function calls.  Those render functions are
+					// included in the invocation scope, so they can be called from within the
+					// function body without requiring additional input arguments.  The callback
+					// below reads live instance state per invocation (props, offsets, profiling
+					// dispatch), so the render functions it backs are safe to cache.
+					const [transpiledBody, jsxRenderFunctions] = transpileFunctionBody(
+						body,
+						(elementJsx, elementExpression, elementScope, sourceBaseOffset = 0) => {
+							const elementParser = new JsxParser(this.props)
+							elementParser.jsx = elementJsx
+							// Parse offsets are local to the element fragment.  Reporting `#userJsx` as
+							// the full source and offsetting by `-sourceBaseOffset` makes `location`
+							// resolve onto the full template, while `jsx` (the fragment) still yields the
+							// correct raw `source` text by slicing with the local offsets.
+							elementParser.#userJsx = this.#userJsx
+							elementParser.#offsetDelta = -sourceBaseOffset
+							// Share the iteration-index stack so elements rendered by this block-bodied
+							// function pick up the source-item index of the active invocation.
+							elementParser.#loopIndexStack = this.#loopIndexStack
+							// Share the function cache so nested block-bodied arrows inside embedded JSX
+							// get Level-1 hits: the render function (and the element AST in its closure)
+							// is cached per outer node, so the nested arrow nodes are identity-stable
+							// across renders even though this sub-parser instance is not.
+							elementParser.#functionCache = this.#functionCache
+							// Share the profiling session so this sub-parser's nodes record into the same
+							// batch, keeping the timing tree connected across the block-body boundary.  The
+							// sub-parser must dispatch through *its own* `#profileExpression` (bound to its
+							// own offset context), not the outer one — so point it there when profiling is on.
+							elementParser.#profiler = this.#profiler
+							elementParser.#parseExpression = this.#profiler
+								? elementParser.#profileExpression
+								: elementParser.#evaluateExpression
+							elementParser.#trackIteration = this.#profiler
+								? elementParser.#profileIterationIndex
+								: elementParser.#trackIterationIndex
+							// Share React-render enablement + the cycle join key so components rendered by this
+							// block-bodied callback are wrapped and tagged with the same cycle.  The sub-parser
+							// keeps its own react parent-stack/buffer and flushes its own `'react'` batch.
+							elementParser.#reactProfilingOn = this.#reactProfilingOn
+							elementParser.#profileCycleId = this.#profileCycleId
+							// The sub-parser's `#parseJSX` never runs, so bind its per-element dispatch here
+							// too — to `#profileElement` when React-render profiling is on (matching the
+							// gate in `#parseJSX`), otherwise the plain `#renderElement`.
+							elementParser.#parseElement = this.#reactProfilingOn
+								? elementParser.#profileElement
+								: elementParser.#renderElement
+							return elementParser.#parseExpression(elementExpression, elementScope)
+						},
+						mapBodyOffsetToSource,
+					)
+					// `mapBodyOffsetToSource` maps offsets in the ORIGINAL (pre-transpile) body onto the
+					// source; JSX render calls are newline-padded (see `transpileFunctionBody`) so the
+					// transpiled body keeps the original line count, letting `constructFunction` resolve
+					// runtime-error offsets even when the body contained JSX.
+					// eslint-disable-next-line no-new-func
+					const constructed = constructFunction(
+						paramNames,
+						transpiledBody,
+						this.lastAttributeName,
+						runtime,
+						mapBodyOffsetToSource,
+						this.#userJsx || this.jsx,
+					)
+					// Cached only on success: a failed compile re-runs (and re-reports) every
+					// render, mirroring the parse-failure rule in `#parseJSX`.
+					entry = { constructed, runtime, renderFunctions: jsxRenderFunctions }
+					this.#functionCache.set(expression, entry)
+				} catch (error: any) {
+					this.props.onError?.(this.#buildError(
+						'function-parse',
+						`Unable to parse function \`${this.lastAttributeName ?? this.#getErrorFriendlyTextForExpression(expression)}\` => ${error}.`,
+						expression,
+						error,
+					))
+					return undefined
+				}
+			} else {
+				entry.runtime!.onError = this.props.onError
+				entry.runtime!.fileName = this.props.fileName
+			}
+
+			const scopeObject = { ...this.props.bindings, ...scope, ...entry.renderFunctions }
+			if (scope === undefined) {
+				// Level 2: one evaluation per render — refresh the scope on the stable proxy
+				// (identity preserved) rather than building a new chain.
+				if (!entry.stableProxy) {
+					entry.stableProxy = createFunctionProxy(entry.constructed!, scopeObject)
+				} else {
+					entry.stableProxy.scope = scopeObject
+				}
+				// The tracking wrapper is rebuilt only when the dispatch variant changed (an
+				// `onProfile` prop appearing/disappearing between renders) — a one-time identity
+				// change on toggle, keeping the plain wrapper free of live profiler reads.
+				if (entry.trackVariant !== this.#trackIteration) {
+					entry.tracked = this.#trackIteration(entry.stableProxy as Function, expression)
+					entry.trackVariant = this.#trackIteration
+				}
+				return entry.tracked
+			}
+			// Per-occurrence evaluation (inside a loop/callback): a fresh, cheap proxy carries
+			// this occurrence's scope over the shared cached target.
+			return this.#trackIteration(
+				createFunctionProxy(entry.constructed!, scopeObject) as Function,
+				expression,
+			)
+		}
+
+		if (scope === undefined) {
+			// Level 2 for expression-bodied arrows (`onClick={() => f()}`): the closure reads
+			// live dispatch/bindings state per invocation and captures only the cache key, so
+			// a single cached instance stays correct across renders.
+			let entry = this.#functionCache.get(expression)
+			if (!entry) {
+				entry = {}
+				this.#functionCache.set(expression, entry)
+			}
+			if (!entry.invoke) {
+				entry.invoke = (...args: any[]) : any => {
+					const functionScope: Record<string, any> = this.#getFunctionScope(undefined, expression, args)
+					return this.#parseExpression(expression.body, functionScope)
+				}
+			}
+			if (entry.trackVariant !== this.#trackIteration) {
+				entry.tracked = this.#trackIteration(entry.invoke, expression)
+				entry.trackVariant = this.#trackIteration
+			}
+			return entry.tracked
+		}
+
+		return this.#trackIteration((...args: any[]) : any => {
+			const functionScope: Record<string, any> = this.#getFunctionScope(scope, expression, args)
+			return this.#parseExpression(expression.body, functionScope)
+		}, expression)
+	}
+
 	#evaluateExpression = (expression: AcornJSX.Expression, scope?: Scope): any => {
 		switch (expression.type) {
 		case 'JSXAttribute':
@@ -688,119 +933,7 @@ export default class JsxParser extends React.Component<TProps> {
 			})
 			return arr
 		case 'ArrowFunctionExpression':
-			if (expression.async || expression.generator) {
-				this.props.onError?.(this.#buildError(
-					'unsupported-function',
-					'Async and generator arrow functions are not supported.',
-					expression,
-					new SyntaxError('Async and generator arrow functions are not supported.'),
-				))
-			}
-
-			// Parse function body and construct a Function object
-			if (expression.body.type === 'BlockStatement') {
-				const paramNames = expression.params.map((param, index) => {
-					switch (param.type) {
-					case 'Identifier':	return param.name
-					case 'RestElement':	return `...${param.argument.name}`
-					default: return `arg_${index}`
-					}
-				})
-
-				// Anything other than straight pass-through of the function parameters
-				// requires wrapping the function in an IIFE to handle this mapping logic
-				const paramsRequirePreprocessing = expression.params.some(param => param.type !== 'Identifier')
-				// When preprocessing, the body is the original arrow source wrapped in this IIFE
-				// prefix; the JSX within therefore sits `PREPROCESS_PREFIX.length` chars into the
-				// body, after the arrow's own start. Otherwise the body is the raw block statement.
-				const PREPROCESS_PREFIX = '{ return ('
-				const body = paramsRequirePreprocessing ?
-					`${PREPROCESS_PREFIX}${this.#getRawTextForExpression(expression)})(${paramNames.join(', ')}); }` :
-					this.#getRawTextForExpression(expression.body)
-				// Maps an offset within `body` back onto the consumer's original (unwrapped) source,
-				// so block-bodied elements report full-template offsets like everything else.
-				const offsetDelta = this.#offsetDelta
-				const mapBodyOffsetToSource = paramsRequirePreprocessing
-					? (bodyOffset: number) => expression.start + (bodyOffset - PREPROCESS_PREFIX.length) - offsetDelta
-					: (bodyOffset: number) => expression.body.start + bodyOffset - offsetDelta
-				try {
-					// JSX elements cannot be rendered by the vanilla JS runtime, so we need to
-					// transpile them into render function calls.  Those render functions are
-					// included in the invocation scope, so they can be called from within the
-					// function body without requiring additional input arguments.
-					const [transpiledBody, jsxRenderFunctions] = transpileFunctionBody(
-						body,
-						{ ...this.props.bindings, ...scope },
-						(elementJsx, elementExpression, elementScope, sourceBaseOffset = 0) => {
-							const elementParser = new JsxParser(this.props)
-							elementParser.jsx = elementJsx
-							// Parse offsets are local to the element fragment.  Reporting `#userJsx` as
-							// the full source and offsetting by `-sourceBaseOffset` makes `location`
-							// resolve onto the full template, while `jsx` (the fragment) still yields the
-							// correct raw `source` text by slicing with the local offsets.
-							elementParser.#userJsx = this.#userJsx
-							elementParser.#offsetDelta = -sourceBaseOffset
-							// Share the iteration-index stack so elements rendered by this block-bodied
-							// function pick up the source-item index of the active invocation.
-							elementParser.#loopIndexStack = this.#loopIndexStack
-							// Share the profiling session so this sub-parser's nodes record into the same
-							// batch, keeping the timing tree connected across the block-body boundary.  The
-							// sub-parser must dispatch through *its own* `#profileExpression` (bound to its
-							// own offset context), not the outer one — so point it there when profiling is on.
-							elementParser.#profiler = this.#profiler
-							elementParser.#parseExpression = this.#profiler
-								? elementParser.#profileExpression
-								: elementParser.#evaluateExpression
-							elementParser.#trackIteration = this.#profiler
-								? elementParser.#profileIterationIndex
-								: elementParser.#trackIterationIndex
-							// Share React-render enablement + the cycle join key so components rendered by this
-							// block-bodied callback are wrapped and tagged with the same cycle.  The sub-parser
-							// keeps its own react parent-stack/buffer and flushes its own `'react'` batch.
-							elementParser.#reactProfilingOn = this.#reactProfilingOn
-							elementParser.#profileCycleId = this.#profileCycleId
-							// The sub-parser's `#parseJSX` never runs, so bind its per-element dispatch here
-							// too — to `#profileElement` when React-render profiling is on (matching the
-							// gate in `#parseJSX`), otherwise the plain `#renderElement`.
-							elementParser.#parseElement = this.#reactProfilingOn
-								? elementParser.#profileElement
-								: elementParser.#renderElement
-							return elementParser.#parseExpression(elementExpression, elementScope)
-						},
-						mapBodyOffsetToSource,
-					)
-					// `mapBodyOffsetToSource` maps offsets in the ORIGINAL (pre-transpile) body onto the
-					// source; JSX render calls are newline-padded (see `transpileFunctionBody`) so the
-					// transpiled body keeps the original line count, letting `constructFunction` resolve
-					// runtime-error offsets even when the body contained JSX.
-					return this.#trackIteration(createFunctionProxy(
-						// eslint-disable-next-line no-new-func
-						constructFunction(
-							paramNames,
-							transpiledBody,
-							this.lastAttributeName,
-							this.props.onError,
-							this.props.fileName,
-							mapBodyOffsetToSource,
-							this.#userJsx || this.jsx,
-						),
-						{ ...this.props.bindings, ...scope, ...jsxRenderFunctions },
-					) as unknown as Function, expression)
-				} catch (error: any) {
-					this.props.onError?.(this.#buildError(
-						'function-parse',
-						`Unable to parse function \`${this.lastAttributeName ?? this.#getErrorFriendlyTextForExpression(expression)}\` => ${error}.`,
-						expression,
-						error,
-					))
-					return undefined
-				}
-			}
-
-			return this.#trackIteration((...args: any[]) : any => {
-				const functionScope: Record<string, any> = this.#getFunctionScope(scope, expression, args)
-				return this.#parseExpression(expression.body, functionScope)
-			}, expression)
+			return this.#parseArrowFunction(expression, scope)
 		case 'BinaryExpression':
 			/* eslint-disable eqeqeq,max-len */
 			switch (expression.operator) {

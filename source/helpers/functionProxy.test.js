@@ -30,4 +30,24 @@ describe('functionProxy', () => {
 
 		expect(result).toEqual(11)
 	})
+	it('carries independent scopes across proxies of the same target', () => {
+		const first = createFunctionProxy(sum, { a: 1, b: 2 })
+		const second = createFunctionProxy(sum, { a: 10, b: 20 })
+
+		expect(first()).toEqual(3)
+		expect(second()).toEqual(30)
+		// Mutating one proxy's scope must not leak into the other...
+		second.scope = { a: 100, b: 200 }
+		expect(first()).toEqual(3)
+		expect(second()).toEqual(300)
+	})
+	it('exposes the current scope via the scope property', () => {
+		const scope = { a: 1, b: 2 }
+		const proxy = createFunctionProxy(sum, scope)
+
+		expect(proxy.scope).toBe(scope)
+		const next = { a: 3, b: 4 }
+		proxy.scope = next
+		expect(proxy.scope).toBe(next)
+	})
 })
