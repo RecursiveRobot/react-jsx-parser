@@ -146,6 +146,16 @@ export default class JsxParser extends React.Component<TProps> {
 	// Shared by reference with the per-element parsers spawned for block-bodied functions.
 	#loopIndexStack: number[] = []
 
+	// The blacklist props compiled once per render (in `#parseJSX`'s reset block) instead of
+	// per element: `blacklistedAttrs` entries become case-insensitive RegExps, `blacklistedTags`
+	// entries are trimmed/lowercased.  Recompiled only when the props array references change
+	// (the defaults are static, so the common case is a pointer compare per render).  Shared by
+	// reference into block-body sub-parsers, whose `#parseJSX` never runs.
+	#compiledBlacklistedAttrs: RegExp[] = []
+	#lastBlacklistedAttrsProp?: Array<string | RegExp>
+	#compiledBlacklistedTags: string[] = []
+	#lastBlacklistedTagsProp?: string[]
+
 	// Per-render occurrence counts backing `#generateKey`, keyed on an element's user-source
 	// offset.  A node rendered once per render keeps the bare offset as its key; repeated
 	// renders of the same node (`.map()` iterations, a local render function invoked more than
@@ -485,6 +495,18 @@ export default class JsxParser extends React.Component<TProps> {
 		// Advancing the render pass lets cached `#trackIteration` wrappers reset their
 		// per-render invocation counts lazily (see `#renderSeq`).
 		this.#renderSeq += 1
+		// Compile the blacklists once per render (not per element in `#resolveElement`),
+		// and only when the props arrays actually changed (see `#compiledBlacklistedAttrs`).
+		if (this.props.blacklistedAttrs !== this.#lastBlacklistedAttrsProp) {
+			this.#compiledBlacklistedAttrs = (this.props.blacklistedAttrs || [])
+				.map(attr => (attr instanceof RegExp ? attr : new RegExp(attr, 'i')))
+			this.#lastBlacklistedAttrsProp = this.props.blacklistedAttrs
+		}
+		if (this.props.blacklistedTags !== this.#lastBlacklistedTagsProp) {
+			this.#compiledBlacklistedTags = (this.props.blacklistedTags || [])
+				.map(tag => tag.trim().toLowerCase()).filter(Boolean)
+			this.#lastBlacklistedTagsProp = this.props.blacklistedTags
+		}
 		// React-nesting bookkeeping is per render; resetting here bounds any imbalance (e.g. a throw
 		// mid-walk) to a single render, exactly like `#loopIndexStack` above.
 		this.#reactParentStack = []
@@ -815,6 +837,10 @@ export default class JsxParser extends React.Component<TProps> {
 							// full render pass's occurrence order (unique among all siblings, and no
 							// reset — a sub-parser's `#parseJSX` never runs).
 							elementParser.#keyOccurrences = this.#keyOccurrences
+							// Share the per-render compiled blacklists for the same reason (same props,
+							// so the outer parser's compile is exactly correct here).
+							elementParser.#compiledBlacklistedAttrs = this.#compiledBlacklistedAttrs
+							elementParser.#compiledBlacklistedTags = this.#compiledBlacklistedTags
 							// Share the function cache so nested block-bodied arrows inside embedded JSX
 							// get Level-1 hits: the render function (and the element AST in its closure)
 							// is cached per outer node, so the nested arrow nodes are identity-stable
@@ -1176,10 +1202,10 @@ export default class JsxParser extends React.Component<TProps> {
 			? this.#parseName(openingTag.name)
 			: ''
 
-		const blacklistedAttrs = (this.props.blacklistedAttrs || [])
-			.map(attr => (attr instanceof RegExp ? attr : new RegExp(attr, 'i')))
-		const blacklistedTags = (this.props.blacklistedTags || [])
-			.map(tag => tag.trim().toLowerCase()).filter(Boolean)
+		// Compiled once per render in `#parseJSX` (and shared into sub-parsers) — see
+		// `#compiledBlacklistedAttrs`.
+		const blacklistedAttrs = this.#compiledBlacklistedAttrs
+		const blacklistedTags = this.#compiledBlacklistedTags
 
 		if (/^(html|head|body)$/i.test(name)) {
 			return { done: true, value: childNodes.map(c => this.#parseElement(c, scope)) as React.JSX.Element[] }
@@ -1195,7 +1221,8 @@ export default class JsxParser extends React.Component<TProps> {
 			return { done: true, value: null }
 		}
 
-		if (name !== '' && !resolvePath(components, name)) {
+		const resolvedComponent = name !== '' ? resolvePath(components, name) : undefined
+		if (name !== '' && !resolvedComponent) {
 			if (componentsOnly) {
 				onError!(this.#buildError(
 					'unrecognized-component',
@@ -1218,7 +1245,7 @@ export default class JsxParser extends React.Component<TProps> {
 		}
 
 		const component = element.type === 'JSXElement'
-			? resolvePath(components, name)
+			? resolvedComponent
 			: Fragment
 		return { done: false, name, component, childNodes, attributes, blacklistedAttrs }
 	}

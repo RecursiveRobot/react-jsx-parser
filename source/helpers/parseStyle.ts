@@ -11,14 +11,12 @@ export const parseStyle = (style: Style): Partial<CSSStyleDeclaration> | undefin
 	switch (typeof style) {
 	case 'string':
 		return style.split(';').filter(r => r)
-			.reduce((map, rule) => {
+			.reduce((acc: Record<string, string>, rule) => {
 				const name = rule.slice(0, rule.indexOf(':')).trim()
 				const value = rule.slice(rule.indexOf(':') + 1).trim()
 
-				return {
-					...map,
-					[camelCase(name)]: value,
-				}
+				acc[camelCase(name)] = value
+				return acc
 			}, {})
 	case 'object':
 		return style

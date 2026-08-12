@@ -868,6 +868,21 @@ describe('JsxParser Component', () => {
 			expect(rendered.childNodes[0].attributes.prefixedFoo).toBeUndefined()
 			expect(rendered.childNodes[0].attributes.prefixedBar).toBeUndefined()
 		})
+		test('applies changed blacklist props on re-render', () => {
+			const jsx = '<span custom="x">a</span><p>b</p>'
+			const { rerender } = rtlRender(
+				<JsxParser jsx={jsx} />,
+				{ container: parent },
+			)
+			expect(parent.querySelector('p')).not.toBeNull()
+			expect(parent.querySelector('span').getAttribute('custom')).toBe('x')
+
+			// The blacklists are compiled once per render, keyed on the props references — new
+			// arrays must recompile and take effect (no stale compile).
+			rerender(<JsxParser jsx={jsx} blacklistedTags={['p']} blacklistedAttrs={['custom']} />)
+			expect(parent.querySelector('p')).toBeNull()
+			expect(parent.querySelector('span').getAttribute('custom')).toBeNull()
+		})
 		test('strips HTML tags if componentsOnly=true', () => {
 			// eslint-disable-next-line react/prop-types
 			const Simple = ({ children, text }) => <div>{text}{children}</div>
