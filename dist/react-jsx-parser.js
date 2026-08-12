@@ -7218,16 +7218,22 @@ function an(e) {
 }
 function on(e, t, n = (e) => e) {
 	let r = {}, i = [];
-	if (an(e).forEach((a, o) => {
+	if (an(e).sort((e, t) => e.start - t.start).forEach((a, o) => {
 		let s = `renderJSXElementWrapper_${o}`;
 		r[s] = rn(e.slice(a.start, a.end), t, n(a.start));
-		let c = e.slice(a.start, a.end), l = c.split("\n").length - 1;
-		i.push([c, `__jsxRenderContext__.${s}({ ${nn(a).join(", ")} })${"\n".repeat(l)}`]);
+		let c = e.slice(a.start, a.end).split("\n").length - 1;
+		i.push([
+			a.start,
+			a.end,
+			`__jsxRenderContext__.${s}({ ${nn(a).join(", ")} })${"\n".repeat(c)}`
+		]);
 	}), !i.length) return [e, {}];
-	let a = `{${tn}${e.slice(1)}`;
-	return i.forEach(([e, t]) => {
-		a = a.replace(e, t);
-	}), [a, r];
+	let a = e;
+	for (let e = i.length - 1; e >= 0; --e) {
+		let [t, n, r] = i[e];
+		a = a.slice(0, t) + r + a.slice(n);
+	}
+	return a = `{${tn}${a.slice(1)}`, [a, r];
 }
 function sn(e, t, n = "anonymous", r, i, a) {
 	let o = `dynamic-${n}-${Math.random().toString(36).substring(2, 9)}.js`, s = t.match(/^\{{1}([\S\s]*)\}{1}$/)?.[1] ?? t;
