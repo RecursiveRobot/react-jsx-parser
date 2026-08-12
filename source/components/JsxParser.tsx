@@ -146,6 +146,16 @@ export default class JsxParser extends React.Component<TProps> {
 	// Shared by reference with the per-element parsers spawned for block-bodied functions.
 	#loopIndexStack: number[] = []
 
+	// Per-render occurrence counts backing `#generateKey`, keyed on an element's user-source
+	// offset.  A node rendered once per render keeps the bare offset as its key; repeated
+	// renders of the same node (`.map()` iterations, a local render function invoked more than
+	// once) get `-1`, `-2`, … suffixes in occurrence order — deterministic while the walk order
+	// is stable, so keys (unlike the old random hashes) survive re-renders and let React update
+	// children in place.  Reset per render pass (not per walk: lazily-invoked render props keep
+	// counting on the same map) and shared by reference into block-body sub-parsers, exactly
+	// like `#loopIndexStack`.
+	#keyOccurrences: Map<number, number> = new Map()
+
 	// Single-entry memo of the last successful top-level parse.  The Acorn AST depends ONLY on the
 	// raw `jsx` prop and `autoCloseVoidElements`, so it can be reused across renders that change
 	// only bindings/scope/other props — the walk (`#parseExpression`) still runs every render.
@@ -258,6 +268,20 @@ export default class JsxParser extends React.Component<TProps> {
 	#currentLoopIndex = (): number | undefined => (
 		this.#loopIndexStack.length ? this.#loopIndexStack[this.#loopIndexStack.length - 1] : undefined
 	)
+
+	// Deterministic `key` for a rendered node: its user-source offset (the same coordinate
+	// `sourceInfo` reports — globally unique across block-body sub-parsers, whose raw offsets
+	// are fragment-local), suffixed with this render's occurrence count when the same node
+	// renders more than once (see `#keyOccurrences`).  Positional caveat: like index keys, a
+	// later occurrence's suffix shifts if an earlier same-node occurrence disappears (e.g. a
+	// memoized host skips re-invoking its render prop) — that subtree then remounts.
+	#generateKey = (expression: AcornJSX.Expression): string | undefined => {
+		if (this.props.disableKeyGeneration) return undefined
+		const base = expression.start - this.#offsetDelta
+		const occurrence = this.#keyOccurrences.get(base) ?? 0
+		this.#keyOccurrences.set(base, occurrence + 1)
+		return occurrence === 0 ? `${base}` : `${base}-${occurrence}`
+	}
 
 	// Wraps a constructed function so each invocation pushes its zero-based call count onto
 	// `#loopIndexStack` for the duration of the call.  This is how a `.map()`-rendered
@@ -457,6 +481,7 @@ export default class JsxParser extends React.Component<TProps> {
 		// loop-index tracking. Cheap, so shared by both branches below.
 		this.#offsetDelta = ROOT_PREFIX_LENGTH
 		this.#loopIndexStack = []
+		this.#keyOccurrences.clear()
 		// Advancing the render pass lets cached `#trackIteration` wrappers reset their
 		// per-render invocation counts lazily (see `#renderSeq`).
 		this.#renderSeq += 1
@@ -786,6 +811,10 @@ export default class JsxParser extends React.Component<TProps> {
 							// Share the iteration-index stack so elements rendered by this block-bodied
 							// function pick up the source-item index of the active invocation.
 							elementParser.#loopIndexStack = this.#loopIndexStack
+							// Share the key-occurrence counts so this sub-parser's elements key on the
+							// full render pass's occurrence order (unique among all siblings, and no
+							// reset — a sub-parser's `#parseJSX` never runs).
+							elementParser.#keyOccurrences = this.#keyOccurrences
 							// Share the function cache so nested block-bodied arrows inside embedded JSX
 							// get Level-1 hits: the render function (and the element AST in its closure)
 							// is cached per outer node, so the nested arrow nodes are identity-stable
@@ -915,7 +944,7 @@ export default class JsxParser extends React.Component<TProps> {
 		case 'JSXExpressionContainer':
 			return this.#parseExpression(expression.expression, scope)
 		case 'JSXText':
-			const key = this.props.disableKeyGeneration ? undefined : randomHash()
+			const key = this.#generateKey(expression)
 			return this.props.disableFragments
 				? expression.value
 				: <Fragment key={key}>{expression.value}</Fragment>
@@ -1234,7 +1263,7 @@ export default class JsxParser extends React.Component<TProps> {
 	): { [key: string]: any } => {
 		const { attributes, blacklistedAttrs, component } = resolved
 		const props: { [key: string]: any } = {
-			key: this.props.disableKeyGeneration ? undefined : randomHash(),
+			key: this.#generateKey(element),
 		}
 		attributes.forEach( // eslint-disable-next-line max-len
 			(expr: AcornJSX.JSXAttribute | AcornJSX.JSXAttributeExpression | AcornJSX.JSXSpreadAttribute) => {

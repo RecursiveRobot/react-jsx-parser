@@ -132,6 +132,11 @@ JsxParser.defaultProps = {
 
   disableKeyGeneration: false, // if true, rendering will not automatically generate `key` props.
   // Note: This may result in the "Child elements should have a unique 'key' prop " React error.
+  // Generated keys are deterministic (derived from the element's source position plus a
+  // per-render occurrence count), so they are stable across re-renders: React updates rendered
+  // children in place rather than remounting them, and `React.memo` children with stable props
+  // (e.g. inline function props, which the parser also keeps reference-stable) can skip
+  // re-renders entirely. Like index keys, occurrence-based keys are positional within a render.
 
   jsx: '', // the jsx string to be parsed & rendered
 

@@ -2941,7 +2941,7 @@ describe('JsxParser Component', () => {
 			expect(parent.querySelector('input').checked).toBe(false)
 		})
 
-		test('re-runs the walk (fresh keys) on a cache hit', () => {
+		test('re-runs the walk (stable keys) on a cache hit', () => {
 			const ref = React.createRef()
 			const jsx = '<div><p>Hello</p></div>'
 			const { rerender } = rtlRender(<JsxParser ref={ref} jsx={jsx} />, { container: parent })
@@ -2951,9 +2951,10 @@ describe('JsxParser Component', () => {
 			rerender(<JsxParser ref={ref} jsx={jsx} someProp />)
 			// No re-parse...
 			expect(extendSpy.mock.calls.length).toBe(afterMount)
-			// ...but the walk re-ran, minting a fresh random key for the element.
-			expect(firstKey).toBeTruthy()
-			expect(ref.current.ParsedChildren[0].key).not.toBe(firstKey)
+			// ...but the walk re-ran, and its deterministic key matches the previous render's —
+			// so React reconciles the element in place instead of remounting it.
+			expect(firstKey).not.toBeUndefined()
+			expect(ref.current.ParsedChildren[0].key).toBe(firstKey)
 		})
 
 		test('does not cache parse failures', () => {
@@ -3108,11 +3109,9 @@ describe('JsxParser Component', () => {
 				return <button type="button" onClick={onPing}>memo</button>
 			})
 			const ping = vi.fn()
-			// Deterministic keys are a separate change (see TODO.md); generated random keys would
-			// remount the child regardless of prop identity, so key generation is disabled here.
 			const jsx = '<Memo onPing={() => this.ping()} />'
 			const { rerender } = rtlRender(
-				<JsxParser components={{ Memo }} blacklistedAttrs={[]} disableKeyGeneration bindings={{ ping }} jsx={jsx} />,
+				<JsxParser components={{ Memo }} blacklistedAttrs={[]} bindings={{ ping }} jsx={jsx} />,
 				{ container: parent },
 			)
 			expect(renders).toHaveBeenCalledTimes(1)
@@ -3120,16 +3119,10 @@ describe('JsxParser Component', () => {
 			expect(parent.querySelector('button')).toBeTruthy()
 
 			rerender(
-				<JsxParser
-					components={{ Memo }}
-					blacklistedAttrs={[]}
-					disableKeyGeneration
-					bindings={{ ping }}
-					jsx={jsx}
-					someProp
-				/>,
+				<JsxParser components={{ Memo }} blacklistedAttrs={[]} bindings={{ ping }} jsx={jsx} someProp />,
 			)
-			// The function prop kept its identity, so the memoized child did not re-render.
+			// The stable key and stable function prop together let the memoized child skip the
+			// re-render entirely — under default configuration, no flags required.
 			expect(renders).toHaveBeenCalledTimes(1)
 		})
 
@@ -3260,6 +3253,90 @@ describe('JsxParser Component', () => {
 			expect(firstOnError).not.toHaveBeenCalled()
 			expect(secondOnError).toHaveBeenCalledTimes(1)
 			expect(secondOnError.mock.calls[0][0].type).toBe('function-runtime')
+		})
+	})
+
+	describe('deterministic keys', () => {
+		test('map siblings get distinct keys that are stable across re-renders', () => {
+			const ref = React.createRef()
+			const jsx = '{items.map(item => <span>{item}</span>)}'
+			const { rerender } = rtlRender(
+				<JsxParser ref={ref} bindings={{ items: ['a', 'b', 'c'] }} jsx={jsx} />,
+				{ container: parent },
+			)
+			const keys = () => ref.current.ParsedChildren[0].map((el: any) => el.key)
+			const firstKeys = keys()
+			// All three spans come from the same AST node; the occurrence suffix keeps siblings unique.
+			expect(new Set(firstKeys).size).toBe(3)
+
+			// Inert re-render: identical key sequence — React updates in place.
+			rerender(<JsxParser ref={ref} bindings={{ items: ['a', 'b', 'c'] }} jsx={jsx} someProp />)
+			expect(keys()).toEqual(firstKeys)
+
+			// Same-shape data change: keys are positional (like index keys), so still identical.
+			rerender(<JsxParser ref={ref} bindings={{ items: ['x', 'y', 'z'] }} jsx={jsx} />)
+			expect(keys()).toEqual(firstKeys)
+		})
+
+		test('repeated render-function calls within one body get distinct keys', () => {
+			const ref = React.createRef()
+			// `renderFoo` is a local closure whose JSX renders from the SAME source position on
+			// both calls — only the per-render occurrence count can disambiguate the two siblings.
+			const jsx = '{(() => { const renderFoo = () => <b>x</b>; return <div>{renderFoo()}{renderFoo()}</div> })()}'
+			const { rerender } = rtlRender(
+				<JsxParser ref={ref} jsx={jsx} />,
+				{ container: parent },
+			)
+			const keys = () => ref.current.ParsedChildren[0].props.children.map((el: any) => el.key)
+			const firstKeys = keys()
+			expect(firstKeys).toHaveLength(2)
+			expect(new Set(firstKeys).size).toBe(2)
+
+			rerender(<JsxParser ref={ref} jsx={jsx} someProp />)
+			expect(keys()).toEqual(firstKeys)
+		})
+
+		test('re-rendering updates children in place without disableKeyGeneration', () => {
+			const renders = vi.fn()
+			const unmounts = vi.fn()
+			const components = {
+				Custom: () => {
+					renders()
+					React.useEffect(() => () => unmounts(), [])
+					return 'Custom element!'
+				},
+			}
+			const { rerender } = rtlRender(
+				<JsxParser components={components} jsx="<div><p>Hello</p><hr /><Custom /></div>" />,
+				{ container: parent },
+			)
+			rerender(
+				<JsxParser components={components} jsx="<div><p>Hello</p><hr /><Custom /></div>" someProp />,
+			)
+			// With stable generated keys, reconciliation matches under DEFAULT configuration:
+			// the child re-rendered but was never unmounted (a remount would fire the effect
+			// cleanup and re-run the mount effect).
+			expect(renders).toHaveBeenCalledTimes(2)
+			expect(unmounts).not.toHaveBeenCalled()
+		})
+
+		test('an explicit key attribute overrides the generated key', () => {
+			const ref = React.createRef()
+			rtlRender(
+				<JsxParser ref={ref} jsx='<div key="mine">hi</div>' />,
+				{ container: parent },
+			)
+			expect(ref.current.ParsedChildren[0].key).toBe('mine')
+		})
+
+		test('disableKeyGeneration still yields keyless elements', () => {
+			const ref = React.createRef()
+			rtlRender(
+				<JsxParser ref={ref} disableKeyGeneration jsx="<div>hi</div>" />,
+				{ container: parent },
+			)
+			// React normalizes an undefined key to null.
+			expect(ref.current.ParsedChildren[0].key).toBeNull()
 		})
 	})
 
