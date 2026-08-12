@@ -22,7 +22,7 @@
   },
   "name": "@recursive-robot/react-jsx-parser",
   "repository": "RecursiveRobot/react-jsx-parser",
-  "version": "2.4.1",
+  "version": "2.4.2",
   "dependencies": {
     "acorn": "^8.17.0",
     "acorn-jsx": "5.3.1",
