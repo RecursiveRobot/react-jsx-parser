@@ -36,6 +36,17 @@ export type TProps = {
 }
 type Scope = Record<string, any>
 
+// Opt-in static hook a resolved component may expose (as `Component.getChildScope`) to feed
+// its own evaluated props into the binding scope of its children.  When present, the walk
+// builds the element's props FIRST, calls the resolver, and parses the children with the
+// returned object active as the ambient scope (see `#ambient`).  Resolution precedence for
+// the subtree: local `scope` (loop/callback locals) > ambient > `bindings` > `window`.
+// `props` includes the parser-generated `key`; resolvers should ignore/omit it.
+export type ChildScopeResolver = (
+	props: Record<string, any>,
+	context: { bindings?: Record<string, any>, scope?: Scope },
+) => Scope | null | undefined | void
+
 // Per-AST-node entry of `#functionCache` (see the field for the caching model).  Level-1
 // fields hold the scope-independent compile artifacts of a block-bodied arrow; Level-2
 // fields hold the stable identity chain returned for evaluations with no local `scope`.
@@ -53,6 +64,11 @@ type FunctionCacheEntry = {
 	invoke?: Function,
 	tracked?: Function,
 	trackVariant?: Function,
+	// Level 2: the ambient scope in effect where the arrow sits in the tree, refreshed on
+	// every evaluation.  The stable proxy/closure outlives the render pass that produced it,
+	// so call-time re-entry into the walk (embedded JSX, expression bodies) restores this via
+	// `#withAmbient` rather than reading the by-then-cleared `#ambient`.
+	ambient?: Scope,
 }
 
 // Result of `#resolveElement`: either an early-return value (blacklisted tag, unrecognized
@@ -165,6 +181,21 @@ export default class JsxParser extends React.Component<TProps> {
 	// counting on the same map) and shared by reference into block-body sub-parsers, exactly
 	// like `#loopIndexStack`.
 	#keyOccurrences: Map<number, number> = new Map()
+
+	// The ambient scope contributed by enclosing `getChildScope` components (see
+	// `ChildScopeResolver`).  A dynamic-extent stack held as a single field: swapped in around
+	// an opted-in element's children parse and restored in `finally`, so it is only ever
+	// non-undefined while walking such a subtree.  Kept OUT of the walk's `scope` parameter on
+	// purpose: a defined `scope` disables the Level-2 stable-proxy cache (every function prop
+	// in the subtree would lose identity stability) and `#getFunctionScope` mutates the scope
+	// object it receives.  Reset per render pass in `#parseJSX` (bounds any imbalance from a
+	// mid-walk throw, like `#loopIndexStack`) and shared into block-body sub-parsers.
+	#ambient?: Scope
+	// Single-entry memo of `bindings` merged under `#ambient`, so the hot sites that need the
+	// combined object (`ThisExpression`, `CallExpression`, block-arrow scopes) pay one merge
+	// per ambient activation instead of one per occurrence.  Invalidated on every `#ambient`
+	// swap; `undefined` ambient bypasses it entirely (zero-allocation fast path).
+	#ambientMerged?: Scope
 
 	// Single-entry memo of the last successful top-level parse.  The Acorn AST depends ONLY on the
 	// raw `jsx` prop and `autoCloseVoidElements`, so it can be reused across renders that change
@@ -483,6 +514,39 @@ export default class JsxParser extends React.Component<TProps> {
 		loopIndex: this.#currentLoopIndex(),
 	})
 
+	// `bindings` as seen at the current walk position.  Without ambient this is the raw
+	// `props.bindings` reference — identical cost to reading the prop directly.  With ambient,
+	// the merge preserves the bindings object's prototype (consumers hang lookup-fallback
+	// proxies off it) so `this.<name>` member access keeps its fallback behaviour.
+	#resolvedBindings = (): Scope | undefined => {
+		if (!this.#ambient) return this.props.bindings
+		this.#ambientMerged ??= Object.assign(
+			Object.create(Object.getPrototypeOf(this.props.bindings ?? {})),
+			this.props.bindings,
+			this.#ambient,
+		)
+		return this.#ambientMerged
+	}
+
+	// Runs `invoke` with `#ambient` restored to the given value — the call-time counterpart of
+	// the walk-time swap in `#parseElement`.  Cached functions fire after the render pass that
+	// produced them (events, render props), when `#ambient` no longer reflects their position
+	// in the tree.  Restores the previous ambient AND its merge memo so a mid-walk invocation
+	// (a render prop called during the same pass) does not invalidate the walk's own cache.
+	#withAmbient = (ambient: Scope | undefined, invoke: () => any): any => {
+		if (ambient === this.#ambient) return invoke()
+		const previous = this.#ambient
+		const previousMerged = this.#ambientMerged
+		this.#ambient = ambient
+		this.#ambientMerged = undefined
+		try {
+			return invoke()
+		} finally {
+			this.#ambient = previous
+			this.#ambientMerged = previousMerged
+		}
+	}
+
 	#parseJSX = (): React.JSX.Element | React.JSX.Element[] | null => {
 		const rawJsx = this.props.jsx
 		const autoClose = this.props.autoCloseVoidElements
@@ -492,6 +556,8 @@ export default class JsxParser extends React.Component<TProps> {
 		this.#offsetDelta = ROOT_PREFIX_LENGTH
 		this.#loopIndexStack = []
 		this.#keyOccurrences.clear()
+		this.#ambient = undefined
+		this.#ambientMerged = undefined
 		// Advancing the render pass lets cached `#trackIteration` wrappers reset their
 		// per-render invocation counts lazily (see `#renderSeq`).
 		this.#renderSeq += 1
@@ -841,6 +907,13 @@ export default class JsxParser extends React.Component<TProps> {
 							// so the outer parser's compile is exactly correct here).
 							elementParser.#compiledBlacklistedAttrs = this.#compiledBlacklistedAttrs
 							elementParser.#compiledBlacklistedTags = this.#compiledBlacklistedTags
+							// Share the ambient scope (and its merge memo — same bindings, so it is
+							// exactly correct here).  This callback runs at invocation time, when the
+							// producing function's `#withAmbient` wrapper has already restored the
+							// ambient of its tree position — so embedded JSX resolves `this.<field>`
+							// and bare identifiers exactly like the main walk at that position.
+							elementParser.#ambient = this.#ambient
+							elementParser.#ambientMerged = this.#ambientMerged
 							// Share the function cache so nested block-bodied arrows inside embedded JSX
 							// get Level-1 hits: the render function (and the element AST in its closure)
 							// is cached per outer node, so the nested arrow nodes are identity-stable
@@ -903,12 +976,20 @@ export default class JsxParser extends React.Component<TProps> {
 				entry.runtime!.fileName = this.props.fileName
 			}
 
-			const scopeObject = { ...this.props.bindings, ...scope, ...entry.renderFunctions }
+			const scopeObject = { ...this.#resolvedBindings(), ...scope, ...entry.renderFunctions }
 			if (scope === undefined) {
 				// Level 2: one evaluation per render — refresh the scope on the stable proxy
-				// (identity preserved) rather than building a new chain.
+				// (identity preserved) rather than building a new chain.  The ambient snapshot is
+				// refreshed alongside it; the invocation wrapper reads it through the entry so the
+				// once-created proxy always restores the CURRENT render's ambient at call time.
+				entry.ambient = this.#ambient
 				if (!entry.stableProxy) {
-					entry.stableProxy = createFunctionProxy(entry.constructed!, scopeObject)
+					const cachedEntry = entry
+					entry.stableProxy = createFunctionProxy(
+						entry.constructed!,
+						scopeObject,
+						invoke => this.#withAmbient(cachedEntry.ambient, invoke),
+					)
 				} else {
 					entry.stableProxy.scope = scopeObject
 				}
@@ -922,9 +1003,16 @@ export default class JsxParser extends React.Component<TProps> {
 				return entry.tracked
 			}
 			// Per-occurrence evaluation (inside a loop/callback): a fresh, cheap proxy carries
-			// this occurrence's scope over the shared cached target.
+			// this occurrence's scope over the shared cached target.  Ambient is captured per
+			// occurrence — the local scope may vary per iteration but the ambient extent is
+			// fixed at this tree position.
+			const occurrenceAmbient = this.#ambient
 			return this.#trackIteration(
-				createFunctionProxy(entry.constructed!, scopeObject) as Function,
+				createFunctionProxy(
+					entry.constructed!,
+					scopeObject,
+					invoke => this.#withAmbient(occurrenceAmbient, invoke),
+				) as Function,
 				expression,
 			)
 		}
@@ -932,16 +1020,23 @@ export default class JsxParser extends React.Component<TProps> {
 		if (scope === undefined) {
 			// Level 2 for expression-bodied arrows (`onClick={() => f()}`): the closure reads
 			// live dispatch/bindings state per invocation and captures only the cache key, so
-			// a single cached instance stays correct across renders.
+			// a single cached instance stays correct across renders.  Ambient is the exception —
+			// it is walk-position state, gone by call time — so it is snapshotted on EVERY
+			// evaluation (cache hits included) and restored around the body evaluation.
 			let entry = this.#functionCache.get(expression)
 			if (!entry) {
 				entry = {}
 				this.#functionCache.set(expression, entry)
 			}
+			entry.ambient = this.#ambient
 			if (!entry.invoke) {
+				const cachedEntry = entry
 				entry.invoke = (...args: any[]) : any => {
 					const functionScope: Record<string, any> = this.#getFunctionScope(undefined, expression, args)
-					return this.#parseExpression(expression.body, functionScope)
+					return this.#withAmbient(
+						cachedEntry.ambient,
+						() => this.#parseExpression(expression.body, functionScope),
+					)
 				}
 			}
 			if (entry.trackVariant !== this.#trackIteration) {
@@ -951,9 +1046,13 @@ export default class JsxParser extends React.Component<TProps> {
 			return entry.tracked
 		}
 
+		const occurrenceAmbient = this.#ambient
 		return this.#trackIteration((...args: any[]) : any => {
 			const functionScope: Record<string, any> = this.#getFunctionScope(scope, expression, args)
-			return this.#parseExpression(expression.body, functionScope)
+			return this.#withAmbient(
+				occurrenceAmbient,
+				() => this.#parseExpression(expression.body, functionScope),
+			)
 		}, expression)
 	}
 
@@ -1022,7 +1121,7 @@ export default class JsxParser extends React.Component<TProps> {
 			}
 			try {
 				const args = expression.arguments.map(arg => this.#parseExpression(arg, scope))
-				const invocationScope =	{ ...this.props.bindings, ...scope }
+				const invocationScope =	{ ...this.#resolvedBindings(), ...scope }
 				return Reflect.apply(parsedCallee, invocationScope, args)
 			} catch (error: any) {
 				this.props.onError?.(this.#buildError(
@@ -1052,7 +1151,11 @@ export default class JsxParser extends React.Component<TProps> {
 		case 'ExpressionStatement':
 			return this.#parseExpression(expression.expression, scope)
 		case 'Identifier':
+			// Chained lookup rather than `#resolvedBindings()`: `bindings` must be probed
+			// directly so its prototype fallback (consumer-supplied lookup proxies) keeps
+			// resolving identifiers exactly as it does without ambient.
 			return scope?.[expression.name] ??
+				this.#ambient?.[expression.name] ??
 				this.props.bindings?.[expression.name] ??
 				window[expression.name as any]
 		case 'Literal':
@@ -1109,7 +1212,7 @@ export default class JsxParser extends React.Component<TProps> {
 				.map(item => this.#parseExpression(item, scope))
 				.join('')
 		case 'ThisExpression':
-			return this.props.bindings
+			return this.#resolvedBindings()
 		case 'UnaryExpression':
 			switch (expression.operator) {
 			case '+': return +this.#parseExpression(expression.argument, scope)
@@ -1360,18 +1463,66 @@ export default class JsxParser extends React.Component<TProps> {
 		return React.createElement(resolved.component || lowerName, props, finalChildren)
 	}
 
+	// Calls a component's `getChildScope` resolver (see `ChildScopeResolver`) with the element's
+	// evaluated props.  A resolver throw degrades gracefully: reported via `onError` (so template
+	// diagnostics surface it) and the children render against the unmodified scope.
+	#resolveChildScope = (
+		resolver: ChildScopeResolver,
+		resolved: ResolvedElement,
+		element: AcornJSX.JSXElement | AcornJSX.JSXFragment,
+		props: { [key: string]: any },
+		scope?: Scope,
+	): Scope | undefined => {
+		try {
+			return resolver(props, { bindings: this.props.bindings, scope }) || undefined
+		} catch (error: any) {
+			this.props.onError?.(this.#buildError(
+				'child-scope',
+				`Unable to resolve the child scope for \`<${resolved.name}>\` => ${error}.`,
+				element,
+				error,
+			))
+			return undefined
+		}
+	}
+
 	// The plain per-element variant (React-render profiling off): resolve → children → props →
 	// create.  Bound to `#parseElement` when `#reactProfilingOn` is false — byte-for-byte the original
 	// walk with no instance-id/parent-stack bookkeeping and no `React.Profiler` wrap.
+	//
+	// `getChildScope` components invert the children/props order: their evaluated props feed the
+	// resolver, whose result is active as `#ambient` for exactly the children parse (composed over
+	// any enclosing ambient; restored in `finally` so a throwing subtree cannot leak it).  Building
+	// props before children is safe order-wise: props/children occupy disjoint source offsets, so
+	// `#generateKey` occurrence counts are unaffected.
 	#renderElement = (
 		element: AcornJSX.JSXElement | AcornJSX.JSXFragment,
 		scope?: Scope,
 	): React.JSX.Element | React.JSX.Element[] | null => {
 		const resolved = this.#resolveElement(element, scope)
 		if (resolved.done) return resolved.value
-		const children = this.#parseElementChildren(resolved, scope)
+		const resolver = (resolved.component as { getChildScope?: ChildScopeResolver } | undefined)?.getChildScope
+		if (!resolver) {
+			const children = this.#parseElementChildren(resolved, scope)
+			const props = this.#buildElementProps(resolved, element, scope)
+			return this.#finishElement(resolved, children, props)
+		}
+
 		const props = this.#buildElementProps(resolved, element, scope)
-		return this.#finishElement(resolved, children, props)
+		const extra = this.#resolveChildScope(resolver, resolved, element, props, scope)
+		const previousAmbient = this.#ambient
+		const previousMerged = this.#ambientMerged
+		if (extra) {
+			this.#ambient = previousAmbient ? { ...previousAmbient, ...extra } : extra
+			this.#ambientMerged = undefined
+		}
+		try {
+			const children = this.#parseElementChildren(resolved, scope)
+			return this.#finishElement(resolved, children, props)
+		} finally {
+			this.#ambient = previousAmbient
+			this.#ambientMerged = previousMerged
+		}
 	}
 
 	// The React-render profiling variant (bound only when `#reactProfilingOn` is true).  Identical to
@@ -1386,6 +1537,15 @@ export default class JsxParser extends React.Component<TProps> {
 		// nodes — they consume no instance id and are not wrapped, exactly as on the plain path.
 		if (resolved.done) return resolved.value
 
+		// `getChildScope` components build their props ahead of the children (mirroring the plain
+		// variant's reorder).  Attribute-JSX parent attribution is unchanged by the reorder: on
+		// either order the props are built while this element is NOT on the parent stack.
+		const resolver = (resolved.component as { getChildScope?: ChildScopeResolver } | undefined)?.getChildScope
+		const preBuiltProps = resolver ? this.#buildElementProps(resolved, element, scope) : undefined
+		const extra = resolver
+			? this.#resolveChildScope(resolver, resolved, element, preBuiltProps!, scope)
+			: undefined
+
 		// React-render profiling wraps EVERY rendered element — host tags, custom components, and
 		// fragments — so the timing tree has no gaps.  Allocate this element's instance id and read its
 		// enclosing profiled element *before* parsing children, so nested elements pick this up as
@@ -1397,12 +1557,24 @@ export default class JsxParser extends React.Component<TProps> {
 			: null
 		this.#reactParentStack.push(reactInstanceId)
 
-		const children = this.#parseElementChildren(resolved, scope)
+		const previousAmbient = this.#ambient
+		const previousMerged = this.#ambientMerged
+		if (extra) {
+			this.#ambient = previousAmbient ? { ...previousAmbient, ...extra } : extra
+			this.#ambientMerged = undefined
+		}
+		let children
+		try {
+			children = this.#parseElementChildren(resolved, scope)
+		} finally {
+			this.#ambient = previousAmbient
+			this.#ambientMerged = previousMerged
+		}
 
 		// Children are built; this element is no longer the enclosing parent for what follows.
 		this.#reactParentStack.pop()
 
-		const props = this.#buildElementProps(resolved, element, scope)
+		const props = preBuiltProps ?? this.#buildElementProps(resolved, element, scope)
 		const rendered = this.#finishElement(resolved, children, props)
 
 		// Wrap the element in a transparent `React.Profiler` (no DOM node).  The Profiler carries the

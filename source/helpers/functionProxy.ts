@@ -16,16 +16,23 @@ export type FunctionProxy = ProxyHandler<ScopedFunction>
 // `#functionCache` in JsxParser), each carrying an independent scope.  The
 // `scope` get/set traps preserve the public `.scope` shape, and assigning
 // `proxy.scope` re-targets subsequent invocations without changing identity.
+//
+// `wrapInvocation` lets the parser bracket each call with ambient-scope
+// restoration (a block body may re-enter the walk via embedded JSX after the
+// producing render pass has ended — see `#withAmbient` in JsxParser).  The
+// no-wrapper path stays allocation-free: the `invoke` thunk is only built
+// when a wrapper exists.
 export function createFunctionProxy(
 	fn: ScopedFunction,
 	scope: Record<string, any>,
+	wrapInvocation?: (invoke: () => any) => any,
 ): ScopedFunction {
 	let currentScope = scope
 	return new Proxy(fn, {
-		apply: (target, thisArg, argArray) => Reflect.apply(
-			target,
-			{ ...currentScope, ...thisArg },
-			argArray,
+		apply: (target, thisArg, argArray) => (
+			wrapInvocation
+				? wrapInvocation(() => Reflect.apply(target, { ...currentScope, ...thisArg }, argArray))
+				: Reflect.apply(target, { ...currentScope, ...thisArg }, argArray)
 		),
 		get: (target, prop, receiver) => (
 			prop === 'scope' ? currentScope : Reflect.get(target, prop, receiver)

@@ -3288,6 +3288,249 @@ describe('JsxParser Component', () => {
 		})
 	})
 
+	describe('child scope injection', () => {
+		// A fresh opted-in component per test keeps `getChildScope` assignments isolated.
+		const makeProvider = getChildScope => {
+			const Provider: any = ({ children }) => <div className="provider">{children}</div>
+			Provider.getChildScope = getChildScope
+			return Provider
+		}
+		// Returns all ad-hoc props as child scope — the typical consumer shape.
+		const fieldsOf = ({ key: _key, children: _children, ...fields }) => fields
+
+		test('resolver-provided values are visible to children but not to siblings outside the element', () => {
+			const Provider = makeProvider(fieldsOf)
+			const { html } = render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Provider }}
+					bindings={{}}
+					jsx={
+						'<Provider greeting="hi"><span>{greeting}</span></Provider>'
+						+ '<span>{greeting ?? "outside"}</span>'
+					}
+				/>,
+			)
+			expect(html).toBe('<div class="provider"><span>hi</span></div><span>outside</span>')
+		})
+
+		test('the resolver receives evaluated props (including the generated key) and { bindings, scope }', () => {
+			const getChildScope = vi.fn(fieldsOf)
+			const Provider = makeProvider(getChildScope)
+			const bindings = { suffix: '!' }
+			render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Provider }}
+					bindings={bindings}
+					jsx='<Provider greeting={"hi" + suffix}><span>{greeting}</span></Provider>'
+				/>,
+			)
+			expect(getChildScope).toHaveBeenCalledTimes(1)
+			const [props, context] = getChildScope.mock.calls[0]
+			expect(props.greeting).toBe('hi!')
+			expect('key' in props).toBe(true)
+			expect(context.bindings).toBe(bindings)
+			expect(context.scope).toBe(undefined)
+			expect(parent.textContent).toBe('hi!')
+		})
+
+		test('precedence: local (loop) scope > ambient > bindings', () => {
+			const Provider = makeProvider(fieldsOf)
+			const { html } = render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Provider }}
+					bindings={{ shadowed: 'from-bindings', fromBindings: 'still-here', items: ['x'] }}
+					jsx={
+						'<Provider shadowed="from-ambient">'
+						+ '<span>{shadowed}</span>'
+						+ '<span>{fromBindings}</span>'
+						+ '{items.map(shadowed => <span>{shadowed}</span>)}'
+						+ '</Provider>'
+					}
+				/>,
+			)
+			expect(html).toContain('<span>from-ambient</span>')
+			expect(html).toContain('<span>still-here</span>')
+			expect(html).toContain('<span>x</span>')
+		})
+
+		test('nested opted-in components compose, and the outer scope is restored after the inner subtree', () => {
+			const Provider = makeProvider(fieldsOf)
+			const { html } = render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Provider }}
+					bindings={{}}
+					jsx={
+						'<Provider a="A" shared="outer">'
+						+ '<Provider b="B" shared="inner"><span>{a}{b}{shared}</span></Provider>'
+						+ '<span>{shared}{b ?? "no-b"}</span>'
+						+ '</Provider>'
+					}
+				/>,
+			)
+			expect(html).toContain('<span>ABinner</span>')
+			expect(html).toContain('<span>outerno-b</span>')
+		})
+
+		test('call-time function bodies see the ambient of their tree position', () => {
+			const Provider = makeProvider(fieldsOf)
+			const record = vi.fn()
+			const ref = React.createRef()
+			render(
+				<JsxParser
+					ref={ref}
+					renderInWrapper={false}
+					blacklistedAttrs={[]}
+					components={{ Provider }}
+					bindings={{ record, items: ['x', 'y'] }}
+					jsx={
+						'<Provider secret="s3cret">'
+						+ '<button className="expr" onClick={() => record(secret)}>expr</button>'
+						+ '<button className="block" onClick={() => { record(this.secret) }}>block</button>'
+						+ '{items.map(item => <button className={"loop-" + item} onClick={() => record(secret + "-" + item)}>{item}</button>)}'
+						+ '</Provider>'
+					}
+				/>,
+			)
+			// All handlers fire AFTER the walk has completed (and its ambient state is cleared)...
+			fireEvent.click(parent.querySelector('.expr'))
+			expect(record).toHaveBeenLastCalledWith('s3cret')
+			fireEvent.click(parent.querySelector('.block'))
+			expect(record).toHaveBeenLastCalledWith('s3cret')
+			fireEvent.click(parent.querySelector('.loop-y'))
+			expect(record).toHaveBeenLastCalledWith('s3cret-y')
+		})
+
+		test('embedded JSX rendered lazily by a block-bodied render prop resolves ambient fields', () => {
+			const Provider = makeProvider(fieldsOf)
+			const List = ({ items = [], renderRow }: any) => (
+				<ul>{items.map((item: any, index: number) => <li key={item}>{renderRow(item, index)}</li>)}</ul>
+			)
+			// Bare identifiers inside a transpiled block body resolve in the compiled function's JS
+			// scope (params/locals only) — `this.<name>` is the supported form for ambient/bindings
+			// values there, exactly as it is for plain bindings.
+			const { html } = render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Provider, List }}
+					bindings={{ items: ['a', 'b'] }}
+					jsx={
+						'<Provider secret="s3cret">'
+						+ '<List items={items} renderRow={(item) => { return <span>{this.secret}-{item}</span> }} />'
+						+ '</Provider>'
+					}
+				/>,
+			)
+			expect(html).toContain('<span>s3cret-a</span>')
+			expect(html).toContain('<span>s3cret-b</span>')
+		})
+
+		test('function props inside the opted-in subtree keep a stable identity across re-renders', () => {
+			const Provider = makeProvider(fieldsOf)
+			const ref = React.createRef()
+			const ping = vi.fn()
+			const jsx = '<Provider secret="s"><button onClick={() => { return this.ping(this.secret) }}>Go</button></Provider>'
+			const { rerender } = rtlRender(
+				<JsxParser
+					ref={ref}
+					renderInWrapper={false}
+					blacklistedAttrs={[]}
+					components={{ Provider }}
+					bindings={{ ping }}
+					jsx={jsx}
+				/>,
+				{ container: parent },
+			)
+			const first = ref.current.ParsedChildren[0].props.children.props
+
+			rerender(
+				<JsxParser
+					ref={ref}
+					renderInWrapper={false}
+					blacklistedAttrs={[]}
+					components={{ Provider }}
+					bindings={{ ping }}
+					jsx={jsx}
+					someProp
+				/>,
+			)
+			const second = ref.current.ParsedChildren[0].props.children.props
+			expect(second.onClick).toBe(first.onClick)
+			second.onClick()
+			expect(ping).toHaveBeenCalledWith('s')
+		})
+
+		test('a throwing resolver reports a child-scope error and the children render against base bindings', () => {
+			const Provider = makeProvider(() => { throw new Error('boom') })
+			const onError = vi.fn()
+			const { html } = render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Provider }}
+					bindings={{ greeting: 'from-bindings' }}
+					onError={onError}
+					jsx='<Provider greeting="scoped"><span>{greeting}</span></Provider>'
+				/>,
+			)
+			expect(onError).toHaveBeenCalledTimes(1)
+			expect(onError.mock.calls[0][0].type).toBe('child-scope')
+			expect(html).toContain('<span>from-bindings</span>')
+		})
+
+		test('renders identically under performance profiling', () => {
+			const Provider = makeProvider(fieldsOf)
+			const jsx = '<Provider greeting="hi"><span>{greeting}</span><span>{greeting}</span></Provider>'
+			const plain = render(
+				<JsxParser renderInWrapper={false} components={{ Provider }} bindings={{}} jsx={jsx} />,
+			).html
+
+			parent = document.createElement('div')
+			const profiled = render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Provider }}
+					bindings={{}}
+					jsx={jsx}
+					onProfile={vi.fn()}
+					profileReactRender
+				/>,
+			).html
+			expect(profiled).toBe(plain)
+		})
+
+		test('ThisExpression still returns the bindings object by identity when no ambient is active', () => {
+			let captured = null
+			const bindings = { probe: value => { captured = value; return '' } }
+			render(<JsxParser renderInWrapper={false} bindings={bindings} jsx="<span>{probe(this)}</span>" />)
+			expect(captured).toBe(bindings)
+		})
+
+		test('the merged `this` under ambient preserves the bindings prototype', () => {
+			const Provider = makeProvider(fieldsOf)
+			let captured = null
+			const proto = { protoValue: 42 }
+			const bindings = Object.assign(Object.create(proto), {
+				probe: value => { captured = value; return '' },
+				fromBindings: 'b',
+			})
+			render(
+				<JsxParser
+					renderInWrapper={false}
+					components={{ Provider }}
+					bindings={bindings}
+					jsx='<Provider secret="s"><span>{probe(this)}</span></Provider>'
+				/>,
+			)
+			expect(captured.secret).toBe('s')
+			expect(captured.fromBindings).toBe('b')
+			expect(captured.protoValue).toBe(42)
+			expect(Object.getPrototypeOf(captured)).toBe(proto)
+		})
+	})
+
 	describe('deterministic keys', () => {
 		test('map siblings get distinct keys that are stable across re-renders', () => {
 			const ref = React.createRef()

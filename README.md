@@ -104,6 +104,41 @@ When rendering HTML, standards-adherent editors will render `img`, `hr`, `br`, a
 // Renders: null
 ```
 
+## Advanced Usage - Child Scope Injection (`getChildScope`)
+
+A component may feed its own **evaluated props** into the binding scope of its children by
+exposing a static `getChildScope` function (opt-in, like `injectSourceInfo`):
+
+```jsx
+const Provider = ({ children }) => <>{children}</>
+// (props, { bindings, scope }) => extra scope for the children (or null/undefined for none)
+Provider.getChildScope = ({ key, children, ...fields }) => fields
+
+<JsxParser
+  components={{ Provider }}
+  bindings={{ region: 'EU' }}
+  jsx='<Provider greeting="hello"><span>{greeting} {region}</span></Provider>'
+/>
+// Renders: <span>hello EU</span> — `greeting` is scoped to the Provider's children only
+```
+
+Details:
+
+- For opted-in components the walk builds the element's props **before** its children (the
+  reverse of the normal order), calls the resolver, and parses the children with the returned
+  object active as the *ambient scope*.
+- Resolution precedence within the subtree: local scope (function params / loop variables) >
+  ambient > `bindings` > `window`. Nested opted-in components compose; the inner scope wins.
+- `props` passed to the resolver include the parser-generated `key`; resolvers should
+  ignore/omit it. The resolver runs during the walk — it must be pure (no side effects).
+- Ambient values reach call-time evaluation too: expression-bodied arrow bodies, block-bodied
+  function bodies (via `this.<name>`), and embedded JSX rendered lazily by render props all see
+  the ambient of their tree position, even when invoked long after the render pass.
+- A throwing resolver is reported via `onError` as a `'child-scope'` error and the children
+  render against the unmodified scope.
+- Function props inside the subtree keep their reference stability (the Level-2 function cache
+  is unaffected by ambient scope).
+
 ## PropTypes / Settings
 ```javascript
 JsxParser.defaultProps = {

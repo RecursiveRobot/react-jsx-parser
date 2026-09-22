@@ -11,6 +11,7 @@ export type JsxParserErrorType =
 	| 'call' // A CallExpression threw while being invoked
 	| 'chain' // A ChainExpression threw while being resolved
 	| 'member-access' // A MemberExpression could not be resolved
+	| 'child-scope' // A component's `getChildScope` resolver threw
 	| 'blacklisted-tag' // The tag is blacklisted and will not be rendered
 	| 'unrecognized-component' // The component is unrecognized (componentsOnly mode)
 	| 'unrecognized-tag' // The tag is unrecognized in this browser
