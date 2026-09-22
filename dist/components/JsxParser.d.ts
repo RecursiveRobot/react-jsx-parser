@@ -25,6 +25,11 @@ export type TProps = {
     renderInWrapper?: boolean;
     renderUnrecognized?: (tagName: string) => React.JSX.Element | null;
 };
+type Scope = Record<string, any>;
+export type ChildScopeResolver = (props: Record<string, any>, context: {
+    bindings?: Record<string, any>;
+    scope?: Scope;
+}) => Scope | null | undefined | void;
 declare const CycleCorrelationContext: React.Context<{
     current: string | null;
 } | null>;
