@@ -10,4 +10,4 @@ export type FunctionRuntimeProps = {
     onError?: (error: JsxParserError) => void;
     fileName?: string;
 };
-export declare function constructFunction(paramNames: string[], body: string, name?: string, runtime?: FunctionRuntimeProps, mapBodyOffsetToSource?: (bodyOffset: number) => number, sourceText?: string): (...args: any[]) => any;
+export declare function constructFunction(paramNames: string[], body: string, name?: string, runtime?: FunctionRuntimeProps, mapBodyOffsetToSource?: (bodyOffset: number) => number, sourceText?: string, isAsync?: boolean): (...args: any[]) => any;

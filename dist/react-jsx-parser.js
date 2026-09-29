@@ -7235,42 +7235,45 @@ function on(e, t, n = (e) => e) {
 	}
 	return a = `{${tn}${a.slice(1)}`, [a, r];
 }
-function sn(e, t, n = "anonymous", r, i, a) {
-	let o = `dynamic-${n}-${Math.random().toString(36).substring(2, 9)}.js`, s = t.match(/^\{{1}([\S\s]*)\}{1}$/)?.[1] ?? t;
-	s = s.replace(/^\n+|\n+$/g, "");
-	let c = `//# sourceURL=${o}\n${s}`, l = Function(...e, c);
+function sn(e, t, n = "anonymous", r, i, a, o = !1) {
+	let s = `dynamic-${n}-${Math.random().toString(36).substring(2, 9)}.js`, c = t.match(/^\{{1}([\S\s]*)\}{1}$/)?.[1] ?? t;
+	c = c.replace(/^\n+|\n+$/g, "");
+	let l = `//# sourceURL=${s}\n${c}`, u = Function(...e, l), d = (e) => {
+		let o = (e?.stack ?? "").split("\n").find((e) => e.includes(s)), l = parseInt(o?.match(/:(\d+):/)?.[1], 10) - 3, u = Kt(c.split("\n")), d = c.split("\n"), f, p;
+		if (i && a !== void 0 && Number.isFinite(l) && l >= 1 && l <= d.length) {
+			let e = t.match(/^\{{1}([\S\s]*)\}{1}$/), n = e?.[1] ?? t;
+			if (n.startsWith(" const __jsxRenderContext__ = this;\r\n")) {
+				let e = i(0), t = Xt(a, e, e).line + l - 2, n = a.split("\n");
+				t >= 1 && t <= n.length && (f = n.slice(0, t - 1).reduce((e, t) => e + t.length + 1, 0), p = f + n[t - 1].length);
+			} else {
+				let t = +!!e + (n.match(/^\n+/)?.[0].length ?? 0), r = d.slice(0, l - 1).reduce((e, t) => e + t.length + 1, 0);
+				f = i(r + t), p = i(r + d[l - 1].length + t);
+			}
+		}
+		let m = Qt({
+			type: "function-runtime",
+			message: e?.message ?? String(e),
+			bodyLines: u,
+			line: l,
+			functionName: n,
+			fileName: r?.fileName,
+			cause: e,
+			sourceText: f === void 0 ? void 0 : a,
+			startOffset: f,
+			endOffset: p
+		});
+		if (r?.onError) {
+			r.onError(m);
+			return;
+		}
+		throw m;
+	};
 	return function(...e) {
 		try {
-			return l.apply(this, e);
+			let t = u.apply(this, e);
+			return o && typeof t?.then == "function" ? t.then(void 0, d) : t;
 		} catch (e) {
-			let c = e.stack.split("\n").find((e) => e.includes(o)), l = parseInt(c?.match(/:(\d+):/)?.[1], 10) - 3, u = Kt(s.split("\n")), d = s.split("\n"), f, p;
-			if (i && a !== void 0 && Number.isFinite(l) && l >= 1 && l <= d.length) {
-				let e = t.match(/^\{{1}([\S\s]*)\}{1}$/), n = e?.[1] ?? t;
-				if (n.startsWith(" const __jsxRenderContext__ = this;\r\n")) {
-					let e = i(0), t = Xt(a, e, e).line + l - 2, n = a.split("\n");
-					t >= 1 && t <= n.length && (f = n.slice(0, t - 1).reduce((e, t) => e + t.length + 1, 0), p = f + n[t - 1].length);
-				} else {
-					let t = +!!e + (n.match(/^\n+/)?.[0].length ?? 0), r = d.slice(0, l - 1).reduce((e, t) => e + t.length + 1, 0);
-					f = i(r + t), p = i(r + d[l - 1].length + t);
-				}
-			}
-			let m = Qt({
-				type: "function-runtime",
-				message: e.message,
-				bodyLines: u,
-				line: l,
-				functionName: n,
-				fileName: r?.fileName,
-				cause: e,
-				sourceText: f === void 0 ? void 0 : a,
-				startOffset: f,
-				endOffset: p
-			});
-			if (r?.onError) {
-				r.onError(m);
-				return;
-			}
-			throw m;
+			return d(e);
 		}
 	};
 }
@@ -7701,7 +7704,7 @@ var Sn = 6, Cn = e.createContext(null), wn = class i extends e.Component {
 		}
 	};
 	#J = (e, t) => {
-		if ((e.async || e.generator) && this.props.onError?.(this.#V("unsupported-function", "Async and generator arrow functions are not supported.", e, /* @__PURE__ */ SyntaxError("Async and generator arrow functions are not supported."))), e.body.type === "BlockStatement") {
+		if (e.body.type === "BlockStatement") {
 			let n = this.#h.get(e);
 			if (n?.constructed) n.runtime.onError = this.props.onError, n.runtime.fileName = this.props.fileName;
 			else {
@@ -7711,7 +7714,7 @@ var Sn = 6, Cn = e.createContext(null), wn = class i extends e.Component {
 						case "RestElement": return `...${e.argument.name}`;
 						default: return `arg_${t}`;
 					}
-				}), r = e.params.some((e) => e.type !== "Identifier"), a = r ? `{ return (${this.#j(e)})(${t.join(", ")}); }` : this.#j(e.body), o = this.#t, s = r ? (t) => e.start + (t - 10) - o : (t) => e.body.start + t - o;
+				}), r = !!e.async || e.params.some((e) => e.type !== "Identifier"), a = r ? `{ return (${this.#j(e)})(${t.join(", ")}); }` : this.#j(e.body), o = this.#t, s = r ? (t) => e.start + (t - 10) - o : (t) => e.body.start + t - o;
 				try {
 					let r = {
 						onError: this.props.onError,
@@ -7721,7 +7724,7 @@ var Sn = 6, Cn = e.createContext(null), wn = class i extends e.Component {
 						return a.jsx = e, a.#e = this.#e, a.#t = -r, a.#n = this.#n, a.#s = this.#s, a.#r = this.#r, a.#a = this.#a, a.#c = this.#c, a.#l = this.#l, a.#h = this.#h, a.#_ = this.#_, a.#O = this.#_ ? a.#q : a.#Y, a.#k = this.#_ ? a.#L : a.#I, a.#C = this.#C, a.#v = this.#v, a.#A = this.#C ? a.#ie : a.#re, a.#O(t, n);
 					}, s);
 					n = {
-						constructed: sn(t, o, this.lastAttributeName, r, s, this.#e || this.jsx),
+						constructed: sn(t, o, this.lastAttributeName, r, s, this.#e || this.jsx, !!e.async),
 						runtime: r,
 						renderFunctions: c
 					}, this.#h.set(e, n);
@@ -7746,22 +7749,23 @@ var Sn = 6, Cn = e.createContext(null), wn = class i extends e.Component {
 			let a = this.#c;
 			return this.#k(xn(n.constructed, r, (e) => this.#U(a, e)), e);
 		}
+		let n = e.body.type === "AwaitExpression" ? e.body.argument : e.body, r = (t) => e.async ? async (...e) => t(...e) : t;
 		if (t === void 0) {
 			let t = this.#h.get(e);
 			if (t || (t = {}, this.#h.set(e, t)), t.ambient = this.#c, !t.invoke) {
-				let n = t;
-				t.invoke = (...t) => {
+				let i = t;
+				t.invoke = r((...t) => {
 					let r = this.#ae(void 0, e, t);
-					return this.#U(n.ambient, () => this.#O(e.body, r));
-				};
+					return this.#U(i.ambient, () => this.#O(n, r));
+				});
 			}
 			return t.trackVariant !== this.#k && (t.tracked = this.#k(t.invoke, e), t.trackVariant = this.#k), t.tracked;
 		}
-		let n = this.#c;
-		return this.#k((...r) => {
+		let a = this.#c;
+		return this.#k(r((...r) => {
 			let i = this.#ae(t, e, r);
-			return this.#U(n, () => this.#O(e.body, i));
-		}, e);
+			return this.#U(a, () => this.#O(n, i));
+		}), e);
 	};
 	#Y = (e, n) => {
 		switch (e.type) {
@@ -7784,6 +7788,9 @@ var Sn = 6, Cn = e.createContext(null), wn = class i extends e.Component {
 					t !== void 0 && a.push(t);
 				}), a;
 			case "ArrowFunctionExpression": return this.#J(e, n);
+			case "AwaitExpression":
+				this.props.onError?.(this.#V("unsupported-function", "`await` is only supported as the entire body of an async arrow function, or in statements of an async block body (not inside embedded JSX).", e, /* @__PURE__ */ SyntaxError("`await` is not supported within template expressions.")));
+				return;
 			case "BinaryExpression":
 				switch (e.operator) {
 					case "-": return this.#O(e.left, n) - this.#O(e.right, n);
