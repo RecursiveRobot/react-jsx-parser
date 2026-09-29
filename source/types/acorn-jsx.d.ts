@@ -78,6 +78,11 @@ declare module 'acorn-jsx' {
 		params: Pattern[]
 	}
 
+	export interface AwaitExpression extends BaseExpression {
+		type: 'AwaitExpression';
+		argument: Expression;
+	}
+
 	export interface BinaryExpression extends BaseExpression {
 		type: 'BinaryExpression';
 		left: Expression;
@@ -201,6 +206,7 @@ declare module 'acorn-jsx' {
 	| JSXText
 	| ArrayExpression
 	| ArrowFunctionExpression
+	| AwaitExpression
 	| BinaryExpression
 	| BlockStatement
 	| CallExpression

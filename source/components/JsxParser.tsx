@@ -835,15 +835,6 @@ export default class JsxParser extends React.Component<TProps> {
 	// prop — carries a defined scope, so per-occurrence evaluations always get their own
 	// proxy (over the shared Level-1 target) and never contaminate each other.
 	#parseArrowFunction = (expression: AcornJSX.ArrowFunctionExpression, scope?: Scope): any => {
-		if (expression.async || expression.generator) {
-			this.props.onError?.(this.#buildError(
-				'unsupported-function',
-				'Async and generator arrow functions are not supported.',
-				expression,
-				new SyntaxError('Async and generator arrow functions are not supported.'),
-			))
-		}
-
 		// Parse function body and construct a Function object
 		if (expression.body.type === 'BlockStatement') {
 			let entry = this.#functionCache.get(expression)
@@ -857,19 +848,23 @@ export default class JsxParser extends React.Component<TProps> {
 				})
 
 				// Anything other than straight pass-through of the function parameters
-				// requires wrapping the function in an IIFE to handle this mapping logic
-				const paramsRequirePreprocessing = expression.params.some(param => param.type !== 'Identifier')
+				// requires wrapping the function in an IIFE to handle this mapping logic.
+				// Async arrows take the same route: the raw arrow source (async keyword
+				// included) becomes an inner function the plain `Function` constructor
+				// accepts, with the CONSTRUCTED function staying synchronous and returning
+				// the inner arrow's promise.
+				const requiresPreprocessing = !!expression.async || expression.params.some(param => param.type !== 'Identifier')
 				// When preprocessing, the body is the original arrow source wrapped in this IIFE
 				// prefix; the JSX within therefore sits `PREPROCESS_PREFIX.length` chars into the
 				// body, after the arrow's own start. Otherwise the body is the raw block statement.
 				const PREPROCESS_PREFIX = '{ return ('
-				const body = paramsRequirePreprocessing ?
+				const body = requiresPreprocessing ?
 					`${PREPROCESS_PREFIX}${this.#getRawTextForExpression(expression)})(${paramNames.join(', ')}); }` :
 					this.#getRawTextForExpression(expression.body)
 				// Maps an offset within `body` back onto the consumer's original (unwrapped) source,
 				// so block-bodied elements report full-template offsets like everything else.
 				const offsetDelta = this.#offsetDelta
-				const mapBodyOffsetToSource = paramsRequirePreprocessing
+				const mapBodyOffsetToSource = requiresPreprocessing
 					? (bodyOffset: number) => expression.start + (bodyOffset - PREPROCESS_PREFIX.length) - offsetDelta
 					: (bodyOffset: number) => expression.body.start + bodyOffset - offsetDelta
 				try {
@@ -957,6 +952,7 @@ export default class JsxParser extends React.Component<TProps> {
 						runtime,
 						mapBodyOffsetToSource,
 						this.#userJsx || this.jsx,
+						!!expression.async,
 					)
 					// Cached only on success: a failed compile re-runs (and re-reports) every
 					// render, mirroring the parse-failure rule in `#parseJSX`.
@@ -1017,6 +1013,16 @@ export default class JsxParser extends React.Component<TProps> {
 			)
 		}
 
+		// `await <expr>` as the ENTIRE body evaluates as just `<expr>`: the async invoke
+		// wrapper awaits the returned value, which is exactly what the await would do.
+		// Deeper awaits cannot suspend the synchronous walk and surface through the
+		// `AwaitExpression` error case instead.
+		const body = expression.body.type === 'AwaitExpression' ? expression.body.argument : expression.body
+		// Async arrows must return a promise and surface a synchronous throw as a rejection.
+		const withAsyncSemantics = (invoke: (...args: any[]) => any): (...args: any[]) => any => (
+			expression.async ? async (...args: any[]) => invoke(...args) : invoke
+		)
+
 		if (scope === undefined) {
 			// Level 2 for expression-bodied arrows (`onClick={() => f()}`): the closure reads
 			// live dispatch/bindings state per invocation and captures only the cache key, so
@@ -1031,13 +1037,13 @@ export default class JsxParser extends React.Component<TProps> {
 			entry.ambient = this.#ambient
 			if (!entry.invoke) {
 				const cachedEntry = entry
-				entry.invoke = (...args: any[]) : any => {
+				entry.invoke = withAsyncSemantics((...args: any[]) : any => {
 					const functionScope: Record<string, any> = this.#getFunctionScope(undefined, expression, args)
 					return this.#withAmbient(
 						cachedEntry.ambient,
-						() => this.#parseExpression(expression.body, functionScope),
+						() => this.#parseExpression(body, functionScope),
 					)
-				}
+				})
 			}
 			if (entry.trackVariant !== this.#trackIteration) {
 				entry.tracked = this.#trackIteration(entry.invoke, expression)
@@ -1047,13 +1053,13 @@ export default class JsxParser extends React.Component<TProps> {
 		}
 
 		const occurrenceAmbient = this.#ambient
-		return this.#trackIteration((...args: any[]) : any => {
+		return this.#trackIteration(withAsyncSemantics((...args: any[]) : any => {
 			const functionScope: Record<string, any> = this.#getFunctionScope(scope, expression, args)
 			return this.#withAmbient(
 				occurrenceAmbient,
-				() => this.#parseExpression(expression.body, functionScope),
+				() => this.#parseExpression(body, functionScope),
 			)
-		}, expression)
+		}), expression)
 	}
 
 	#evaluateExpression = (expression: AcornJSX.Expression, scope?: Scope): any => {
@@ -1088,6 +1094,18 @@ export default class JsxParser extends React.Component<TProps> {
 			return arr
 		case 'ArrowFunctionExpression':
 			return this.#parseArrowFunction(expression, scope)
+		case 'AwaitExpression':
+			// Only reachable when an await is NESTED inside an async arrow's expression
+			// body, where the synchronous walk cannot suspend.  (A whole-body await is
+			// unwrapped by `#parseArrowFunction`, block-body awaits run as real JS, and
+			// awaits inside embedded JSX already fail Acorn's fragment parse.)
+			this.props.onError?.(this.#buildError(
+				'unsupported-function',
+				'`await` is only supported as the entire body of an async arrow function, or in statements of an async block body (not inside embedded JSX).',
+				expression,
+				new SyntaxError('`await` is not supported within template expressions.'),
+			))
+			return undefined
 		case 'BinaryExpression':
 			/* eslint-disable eqeqeq,max-len */
 			switch (expression.operator) {

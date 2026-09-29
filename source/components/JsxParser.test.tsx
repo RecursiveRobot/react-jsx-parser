@@ -3986,4 +3986,137 @@ describe('JsxParser Component', () => {
 			})
 		})
 	})
+
+	describe('async arrow functions', () => {
+		test('supports an async block-bodied handler (returns a promise, awaits complete)', async () => {
+			const onError = vi.fn()
+			const effect = vi.fn()
+			const jsx = '<button onClick={async () => { await Promise.resolve(); this.effect("done"); return 42; }}>Go</button>'
+			const { component } = render(
+				<JsxParser blacklistedAttrs={[]} bindings={{ effect }} onError={onError} jsx={jsx} />,
+			)
+
+			const result = component.ParsedChildren[0].props.onClick()
+			expect(result).toBeInstanceOf(Promise)
+			await expect(result).resolves.toBe(42)
+			expect(effect).toHaveBeenCalledWith('done')
+			expect(onError).not.toHaveBeenCalled()
+		})
+
+		test('supports async arrows with destructured parameters', async () => {
+			const effect = vi.fn()
+			const jsx = '<button onClick={async ({ a, b }) => { await Promise.resolve(); this.effect(a + b); }}>Go</button>'
+			const { component } = render(
+				<JsxParser blacklistedAttrs={[]} bindings={{ effect }} jsx={jsx} />,
+			)
+
+			await component.ParsedChildren[0].props.onClick({ a: 1, b: 2 })
+			expect(effect).toHaveBeenCalledWith(3)
+		})
+
+		test('renders JSX built inside an async body', async () => {
+			const capture = vi.fn()
+			const jsx = '<button onClick={async () => { this.capture(<b>hi</b>); await Promise.resolve(); }}>Go</button>'
+			const { component } = render(
+				<JsxParser blacklistedAttrs={[]} bindings={{ capture }} jsx={jsx} />,
+			)
+
+			await component.ParsedChildren[0].props.onClick()
+			const [element] = capture.mock.calls[0]
+			expect(React.isValidElement(element)).toBe(true)
+			expect(element.type).toBe('b')
+		})
+
+		test('maps a rejection after an await to a structured function-runtime error with source offsets', async () => {
+			const onError = vi.fn()
+			const jsx = `<button onClick={async () => {
+				const ready = await Promise.resolve(true);
+				this.does.not.exist();
+			}}>Go</button>`
+			const { component } = render(
+				<JsxParser blacklistedAttrs={[]} onError={onError} jsx={jsx} />,
+			)
+
+			// With `onError` supplied the rejection is reported and the promise resolves undefined,
+			// mirroring the synchronous contract.
+			await expect(component.ParsedChildren[0].props.onClick()).resolves.toBeUndefined()
+
+			const error = onError.mock.calls[0][0]
+			expect(error).toBeInstanceOf(JsxParserError)
+			expect(error.type).toBe('function-runtime')
+			expect(error.cause).toBeInstanceOf(Error)
+			expect(jsx.slice(error.sourceInfo.location.startOffset, error.sourceInfo.location.endOffset))
+				.toBe(error.sourceInfo.source)
+			expect(error.sourceInfo.source.trim()).toBe('this.does.not.exist();')
+		})
+
+		test('never leaks an unhandled rejection when no onError is supplied', async () => {
+			// The default no-op `onError` absorbs the mapped rejection, mirroring how a
+			// synchronous throw is swallowed — the handler's promise resolves undefined.
+			const jsx = '<button onClick={async () => { await Promise.resolve(); this.nope.boom(); }}>Go</button>'
+			const { component } = render(<JsxParser blacklistedAttrs={[]} jsx={jsx} />)
+
+			await expect(component.ParsedChildren[0].props.onClick()).resolves.toBeUndefined()
+		})
+
+		test('supports expression-bodied async arrows (whole-body await and plain)', async () => {
+			const double = vi.fn(async n => n * 2)
+			const jsx = '<button onClick={async () => await this.double(21)} onBlur={async () => this.double(4)}>Go</button>'
+			const { component } = render(
+				<JsxParser blacklistedAttrs={[]} bindings={{ double }} jsx={jsx} />,
+			)
+
+			const clicked = component.ParsedChildren[0].props.onClick()
+			expect(clicked).toBeInstanceOf(Promise)
+			await expect(clicked).resolves.toBe(42)
+			// A promise-returning body is flattened by the async wrapper, like a real async arrow.
+			await expect(component.ParsedChildren[0].props.onBlur()).resolves.toBe(8)
+		})
+
+		test('reports a structured error for a nested await in an expression body', async () => {
+			const onError = vi.fn()
+			const get = vi.fn(async () => 1)
+			const jsx = '<button onClick={async () => (await this.get()) + 1}>Go</button>'
+			const { component } = render(
+				<JsxParser blacklistedAttrs={[]} bindings={{ get }} onError={onError} jsx={jsx} />,
+			)
+
+			await component.ParsedChildren[0].props.onClick()
+			const error = onError.mock.calls[0][0]
+			expect(error).toBeInstanceOf(JsxParserError)
+			expect(error.type).toBe('unsupported-function')
+		})
+
+		test('reports a structured parse error for an await inside embedded JSX', () => {
+			// Embedded JSX re-enters the synchronous walk, so its expressions can never await;
+			// Acorn already rejects the extracted fragment, failing the whole construction.
+			const onError = vi.fn()
+			const jsx = '<button onClick={async () => { this.capture(<b>{await this.get()}</b>); }}>Go</button>'
+			const { component } = render(
+				<JsxParser blacklistedAttrs={[]} onError={onError} jsx={jsx} />,
+			)
+
+			expect(component.ParsedChildren[0].props.onClick).toBeUndefined()
+			expect(onError.mock.calls.map(call => call[0].type)).toContain('function-parse')
+		})
+
+		test('returns identical async function references across inert re-renders', async () => {
+			const ref = React.createRef()
+			const ping = vi.fn()
+			const jsx = '<button onClick={async () => this.ping()} onBlur={async () => { await Promise.resolve(); this.ping(); }}>Go</button>'
+			const { rerender } = rtlRender(
+				<JsxParser ref={ref} blacklistedAttrs={[]} bindings={{ ping }} jsx={jsx} />,
+				{ container: parent },
+			)
+			const first = ref.current.ParsedChildren[0].props
+
+			rerender(<JsxParser ref={ref} blacklistedAttrs={[]} bindings={{ ping }} jsx={jsx} someProp />)
+			const second = ref.current.ParsedChildren[0].props
+			expect(second.onClick).toBe(first.onClick)
+			expect(second.onBlur).toBe(first.onBlur)
+			await second.onClick()
+			await second.onBlur()
+			expect(ping).toHaveBeenCalledTimes(2)
+		})
+	})
 })

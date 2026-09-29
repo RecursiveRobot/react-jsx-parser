@@ -55,9 +55,15 @@ Finally, a note about property bindings. The `JsxParser` can handle several type
  - [single statement arrow expressions](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Arrow_functions#basic_syntax), such as `(item) => <p>{item.name}</p>`
  - [multi-statement arrow functions](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Arrow_functions#function_body), such as `(item) => { const { name } = item; return <p>{name}</p>; }`
 
-This component also supports inline arrow function declarations (both expression-bodied and block-bodied), such as:
+This component supports inline arrow function declarations (both expression-bodied and block-bodied), such as:
  - `onClick={() => showToastNotification("Button clicked!") }`
  - `onClick={() => { this.showToastNotification("Button clicked!); }}` (parser bindings and local scope are bound to the function execution context)
+
+`async` arrow functions are supported too - useful for event handlers which await:
+ - `onClick={async () => { const data = await this.fetchData(); this.showToastNotification(data.message); }}`
+ - `onClick={async () => await this.saveChanges()}` (an expression body may `await` only as its entire body)
+
+An async handler returns a real `Promise`; a rejection is mapped to a structured `function-runtime` error and delivered to `onError`, after which the promise resolves `undefined`. Limitations: `await` cannot appear *inside* embedded JSX expressions (JSX rendering is synchronous), and JSX built *after* an `await` loses its loop-index / child-scope context (bindings remain correct).
 
 ## Advanced Usage - Injecting Dynamic JSX
 ```javascript

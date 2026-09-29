@@ -317,6 +317,9 @@ export function constructFunction(
 	// offset-free (legacy behaviour).
 	mapBodyOffsetToSource?: (bodyOffset: number) => number,
 	sourceText?: string,
+	// An async body only throws synchronously before its first await; later failures arrive
+	// as a promise rejection, which needs its own mapping path (see the wrapper below).
+	isAsync: boolean = false,
 ) {
 	// Create a unique identifier for this function...
 	const fnId = Math.random().toString(36).substring(2, 9)
@@ -331,76 +334,88 @@ export function constructFunction(
 
 	// eslint-disable-next-line no-new-func
 	const fn = new Function(...paramNames, enhancedBody)
+
+	// Maps a runtime failure onto the consumer's source (via the sourceURL stack frame) and
+	// routes it through `onError` when available.  Shared by the synchronous catch and the
+	// async rejection path in the wrapper below.
+	const handleRuntimeError = (error: any): undefined => {
+		// Parse the stack trace to find the line to highlight...
+		const stackLines = (error?.stack ?? '').split('\n')
+		const errorLine = stackLines.find((line: string) => line.includes(sourceUrl))
+		const errorLineNumber = parseInt(errorLine?.match(/:(\d+):/)?.[1], 10) - 3
+
+		// Build a structured error including the relevant source code...
+		const codeLines = trimExcessLeadingWhitespaceFromCodeLines(trimmedBody.split('\n'))
+
+		// When the body's line structure is preserved, resolve the offending line's source
+		// offsets so the error carries LSP-usable offsets.
+		const rawLines = trimmedBody.split('\n')
+		let startOffset: number | undefined
+		let endOffset: number | undefined
+		if (
+			mapBodyOffsetToSource && sourceText !== undefined &&
+			Number.isFinite(errorLineNumber) && errorLineNumber >= 1 && errorLineNumber <= rawLines.length
+		) {
+			const braceMatch = body.match(/^\{{1}([\S\s]*)\}{1}$/)
+			const afterBrace = braceMatch?.[1] ?? body
+
+			if (afterBrace.startsWith(RENDER_CONTEXT_PREAMBLE)) {
+				// The body was transpiled: JSX elements became render calls of a different length,
+				// so character offsets no longer align — but the newline-padded render calls keep
+				// the line COUNT intact.  Resolve the offending SOURCE line by number (drift-proof)
+				// and highlight the whole line.  `- 2` absorbs the injected preamble line and its
+				// trailing newline (see `RENDER_CONTEXT_PREAMBLE`).
+				const braceOffset = mapBodyOffsetToSource(0)
+				const braceLine = getLocationFromOffsets(sourceText, braceOffset, braceOffset).line
+				const errorSourceLine = braceLine + errorLineNumber - 2
+				const sourceLines = sourceText.split('\n')
+				if (errorSourceLine >= 1 && errorSourceLine <= sourceLines.length) {
+					startOffset = sourceLines.slice(0, errorSourceLine - 1).reduce((n, l) => n + l.length + 1, 0)
+					endOffset = startOffset + sourceLines[errorSourceLine - 1].length
+				}
+			} else {
+				// Non-transpiled: `trimmedBody` maps onto the body by a constant prefix delta (the
+				// stripped `{` plus any stripped leading blank lines), so map the offending line's
+				// character offsets directly — this stays clamped to the body's content.
+				const prefixDelta = (braceMatch ? 1 : 0) + (afterBrace.match(/^\n+/)?.[0].length ?? 0)
+				const lineStart = rawLines.slice(0, errorLineNumber - 1).reduce((n, l) => n + l.length + 1, 0)
+				startOffset = mapBodyOffsetToSource(lineStart + prefixDelta)
+				endOffset = mapBodyOffsetToSource(lineStart + rawLines[errorLineNumber - 1].length + prefixDelta)
+			}
+		}
+
+		const structuredError = buildErrorFromLine({
+			type: 'function-runtime',
+			message: error?.message ?? String(error),
+			bodyLines: codeLines,
+			line: errorLineNumber,
+			functionName: name,
+			fileName: runtime?.fileName,
+			cause: error,
+			sourceText: startOffset !== undefined ? sourceText : undefined,
+			startOffset,
+			endOffset,
+		})
+
+		if (runtime?.onError) {
+			runtime.onError(structuredError)
+			return undefined
+		}
+
+		throw structuredError
+	}
+
 	return function anonymous(...args: any[]) {
 		// Wrap the function call in a try/catch block to allow us to augment the error message...
 		try {
 			// @ts-ignore: 'this' scope binding uses implicit any
-			return fn.apply(this, args)
+			const result = fn.apply(this, args)
+			if (isAsync && typeof result?.then === 'function') {
+				return result.then(undefined, handleRuntimeError)
+			}
+			return result
 		} catch (error: any) {
-			// Parse the stack trace to find the line to highlight...
-			const stackLines = error.stack.split('\n')
-			const errorLine = stackLines.find((line: string) => line.includes(sourceUrl))
-			const errorLineNumber = parseInt(errorLine?.match(/:(\d+):/)?.[1], 10) - 3
-
-			// Build a structured error including the relevant source code...
-			const codeLines = trimExcessLeadingWhitespaceFromCodeLines(trimmedBody.split('\n'))
-
-			// When the body's line structure is preserved, resolve the offending line's source
-			// offsets so the error carries LSP-usable offsets.
-			const rawLines = trimmedBody.split('\n')
-			let startOffset: number | undefined
-			let endOffset: number | undefined
-			if (
-				mapBodyOffsetToSource && sourceText !== undefined &&
-				Number.isFinite(errorLineNumber) && errorLineNumber >= 1 && errorLineNumber <= rawLines.length
-			) {
-				const braceMatch = body.match(/^\{{1}([\S\s]*)\}{1}$/)
-				const afterBrace = braceMatch?.[1] ?? body
-
-				if (afterBrace.startsWith(RENDER_CONTEXT_PREAMBLE)) {
-					// The body was transpiled: JSX elements became render calls of a different length,
-					// so character offsets no longer align — but the newline-padded render calls keep
-					// the line COUNT intact.  Resolve the offending SOURCE line by number (drift-proof)
-					// and highlight the whole line.  `- 2` absorbs the injected preamble line and its
-					// trailing newline (see `RENDER_CONTEXT_PREAMBLE`).
-					const braceOffset = mapBodyOffsetToSource(0)
-					const braceLine = getLocationFromOffsets(sourceText, braceOffset, braceOffset).line
-					const errorSourceLine = braceLine + errorLineNumber - 2
-					const sourceLines = sourceText.split('\n')
-					if (errorSourceLine >= 1 && errorSourceLine <= sourceLines.length) {
-						startOffset = sourceLines.slice(0, errorSourceLine - 1).reduce((n, l) => n + l.length + 1, 0)
-						endOffset = startOffset + sourceLines[errorSourceLine - 1].length
-					}
-				} else {
-					// Non-transpiled: `trimmedBody` maps onto the body by a constant prefix delta (the
-					// stripped `{` plus any stripped leading blank lines), so map the offending line's
-					// character offsets directly — this stays clamped to the body's content.
-					const prefixDelta = (braceMatch ? 1 : 0) + (afterBrace.match(/^\n+/)?.[0].length ?? 0)
-					const lineStart = rawLines.slice(0, errorLineNumber - 1).reduce((n, l) => n + l.length + 1, 0)
-					startOffset = mapBodyOffsetToSource(lineStart + prefixDelta)
-					endOffset = mapBodyOffsetToSource(lineStart + rawLines[errorLineNumber - 1].length + prefixDelta)
-				}
-			}
-
-			const structuredError = buildErrorFromLine({
-				type: 'function-runtime',
-				message: error.message,
-				bodyLines: codeLines,
-				line: errorLineNumber,
-				functionName: name,
-				fileName: runtime?.fileName,
-				cause: error,
-				sourceText: startOffset !== undefined ? sourceText : undefined,
-				startOffset,
-				endOffset,
-			})
-
-			if (runtime?.onError) {
-				runtime.onError(structuredError)
-				return undefined
-			}
-
-			throw structuredError
+			return handleRuntimeError(error)
 		}
 	}
 }

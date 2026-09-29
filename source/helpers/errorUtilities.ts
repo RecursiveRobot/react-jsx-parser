@@ -4,7 +4,7 @@ import * as AcornJSX from 'acorn-jsx'
 /// Each value corresponds to a distinct failure site within the parser.
 export type JsxParserErrorType =
 	| 'parse' // The JSX could not be parsed (Acorn SyntaxError)
-	| 'unsupported-function' // Async/generator arrow functions are not supported
+	| 'unsupported-function' // An `await` appeared where the synchronous walk cannot evaluate it
 	| 'function-parse' // A function body could not be transpiled
 	| 'function-runtime' // A block-bodied function threw at runtime
 	| 'invocation' // A CallExpression/NewExpression callee/constructor could not be resolved
