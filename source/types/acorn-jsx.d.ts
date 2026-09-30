@@ -1,4 +1,3 @@
-/* eslint-disable no-use-before-define */
 declare module 'acorn-jsx' {
 	export interface BaseExpression {
 		start: number;
@@ -70,8 +69,8 @@ declare module 'acorn-jsx' {
 
 	export interface ArrowFunctionExpression extends BaseExpression {
 		type: 'ArrowFunctionExpression';
-		async: Boolean
-		generator: Boolean
+		async: boolean
+		generator: boolean
 		expression: true;
 		argument?: Expression;
 		body: BlockStatement | Expression
@@ -270,4 +269,3 @@ declare module 'acorn-jsx' {
 	}
 	export default function(options?: PluginOptions): any
 }
-/* eslint-enable no-use-before-define */

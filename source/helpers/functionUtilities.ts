@@ -332,7 +332,6 @@ export function constructFunction(
 	// Prepend a source map URL to the body...
 	const enhancedBody = `//# sourceURL=${sourceUrl}\n${trimmedBody}`
 
-	// eslint-disable-next-line no-new-func
 	const fn = new Function(...paramNames, enhancedBody)
 
 	// Maps a runtime failure onto the consumer's source (via the sourceURL stack frame) and

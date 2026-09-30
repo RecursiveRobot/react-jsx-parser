@@ -8,7 +8,7 @@ export default defineConfig({
 	build: {
 		emptyOutDir: true,
 		lib: {
-			entry: resolve(__dirname, 'source/index.ts'),
+			entry: resolve(import.meta.dirname, 'source/index.ts'),
 			fileName: () => 'react-jsx-parser.js',
 			formats: ['es'],
 		},
@@ -57,6 +57,6 @@ export default defineConfig({
 		},
 		environment: 'jsdom',
 		globals: true,
-		setupFiles: [resolve(__dirname, 'vitest.setup.ts')],
+		setupFiles: [resolve(import.meta.dirname, 'vitest.setup.ts')],
 	},
 })

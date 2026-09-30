@@ -1,5 +1,3 @@
-/* eslint-disable no-console, react/require-default-props, react/no-array-index-key */
-/* eslint-disable jsx-a11y/label-has-associated-control */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import JsxParser, { ProfileData, ProfilerNodeTiming } from './index'

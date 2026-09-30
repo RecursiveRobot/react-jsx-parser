@@ -103,7 +103,6 @@ export function trimExcessLeadingWhitespaceFromCodeLines(lines: string[]): strin
 			const leadingWhitespace = line.match(/^(\s*)\S+/)?.[1]
 			return leadingWhitespace ? Math.min(leadingWhitespace.length, min ?? Infinity) : min
 		}, undefined as number | undefined)
-	// eslint-disable-next-line no-confusing-arrow
 	return lines.map(line => line.replace(new RegExp(`^\\s{${minLeadingWhitespace ?? 0}}`), ''))
 }
 

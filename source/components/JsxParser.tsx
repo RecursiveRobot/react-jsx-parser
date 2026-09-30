@@ -1,4 +1,3 @@
-/* eslint-disable linebreak-style */
 import * as Acorn from 'acorn'
 import * as AcornJSX from 'acorn-jsx'
 import React, { Fragment, ComponentType, ExoticComponent } from 'react'
@@ -120,7 +119,6 @@ const ROOT_PREFIX_LENGTH = '<root>'.length
 // descendants to re-render (which would skew the render timings).
 const CycleCorrelationContext = React.createContext<{ current: string | null } | null>(null)
 
-/* eslint-disable consistent-return */
 export default class JsxParser extends React.Component<TProps> {
 	static displayName = 'JsxParser'
 	// Read the nearest ancestor parser's cycleId holder (see `CycleCorrelationContext`).
@@ -944,7 +942,6 @@ export default class JsxParser extends React.Component<TProps> {
 					// source; JSX render calls are newline-padded (see `transpileFunctionBody`) so the
 					// transpiled body keeps the original line count, letting `constructFunction` resolve
 					// runtime-error offsets even when the body contained JSX.
-					// eslint-disable-next-line no-new-func
 					const constructed = constructFunction(
 						paramNames,
 						transpiledBody,
@@ -1107,7 +1104,6 @@ export default class JsxParser extends React.Component<TProps> {
 			))
 			return undefined
 		case 'BinaryExpression':
-			/* eslint-disable eqeqeq,max-len */
 			switch (expression.operator) {
 			case '-': return this.#parseExpression(expression.left, scope) - this.#parseExpression(expression.right, scope)
 			case '!=': return this.#parseExpression(expression.left, scope) != this.#parseExpression(expression.right, scope)
@@ -1123,7 +1119,6 @@ export default class JsxParser extends React.Component<TProps> {
 			case '===': return this.#parseExpression(expression.left, scope) === this.#parseExpression(expression.right, scope)
 			case '>': return this.#parseExpression(expression.left, scope) > this.#parseExpression(expression.right, scope)
 			case '>=': return this.#parseExpression(expression.left, scope) >= this.#parseExpression(expression.right, scope)
-				/* eslint-enable eqeqeq,max-len */
 			}
 			return undefined
 		case 'CallExpression':
@@ -1201,7 +1196,6 @@ export default class JsxParser extends React.Component<TProps> {
 				))
 				return undefined
 			}
-			// eslint-disable-next-line new-cap
 			return new constructor(...expression.arguments.map(a => this.#parseExpression(a, scope)))
 		case 'ObjectExpression':
 			const object: Record<string, any> = {}
@@ -1242,7 +1236,6 @@ export default class JsxParser extends React.Component<TProps> {
 	}
 
 	#parseMemberExpression = (expression: AcornJSX.MemberExpression, scope?: Scope): any => {
-		// eslint-disable-next-line prefer-destructuring
 		let { object } = expression
 
 		// Resolve a single member access into its property key, whether it used optional
@@ -1413,7 +1406,7 @@ export default class JsxParser extends React.Component<TProps> {
 		const props: { [key: string]: any } = {
 			key: this.#generateKey(element),
 		}
-		attributes.forEach( // eslint-disable-next-line max-len
+		attributes.forEach(  
 			(expr: AcornJSX.JSXAttribute | AcornJSX.JSXAttributeExpression | AcornJSX.JSXSpreadAttribute) => {
 				if (expr.type === 'JSXAttribute') {
 					const rawName = expr.name.name
@@ -1689,11 +1682,10 @@ export default class JsxParser extends React.Component<TProps> {
 		// stable, so it never forces a descendant to re-render.  When off, output is left untouched.
 		return this.props.onProfile
 			? (
-				<CycleCorrelationContext.Provider value={this.#cycleIdHolder}>
+				<CycleCorrelationContext value={this.#cycleIdHolder}>
 					{output}
-				</CycleCorrelationContext.Provider>
+				</CycleCorrelationContext>
 			)
 			: output
 	}
 }
-/* eslint-enable consistent-return */

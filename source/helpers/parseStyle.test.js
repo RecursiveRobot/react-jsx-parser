@@ -17,7 +17,6 @@ describe('parseStyle', () => {
 		const before = 'margin: 0 5px; padding: 1em 5px; text-decoration: underline'
 		const after = parseStyle(before)
 
-		/* eslint-disable key-spacing */
 		expect(after).toEqual({
 			margin: '0 5px',
 			padding: '1em 5px',

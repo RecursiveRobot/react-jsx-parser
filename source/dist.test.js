@@ -11,7 +11,6 @@ describe('JSXParser', () => {
 	describe('esm build', () => {
 		// Only runs after `yarn build` has produced the bundle.
 		it.skipIf(!isBuilt)('should load and parse', async () => {
-			// eslint-disable-next-line import/extensions
 			await expect(import('../dist/react-jsx-parser.js')).resolves.toBeDefined()
 		})
 	})

@@ -142,7 +142,6 @@ describe('getClosureBindings', () => {
 		expect(bindings).toEqual(['foo'])
 	})
 	it('should handle template literals', () => {
-		// eslint-disable-next-line no-template-curly-in-string
 		const text = '<span>{`${foo} - ${bar}`}</span>'
 		const expression = parser.parse(text, { ecmaVersion: 'latest' })
 		const bindings = getClosureBindings(expression.body[0])
@@ -325,12 +324,10 @@ describe('getAllJsxElements', () => {
 			try {
 				func(1, 2)
 			} catch (error) {
-				/* eslint-disable no-regex-spaces */
 				expect(error.message).toMatch(/Error occurred in dynamic function `anonymous` at line `1`:/)
 				expect(error.message).toMatch(/>>> 1: throw new Error\("This line should be highlighted."\);/)
 				expect(error.stack).not.toMatch(/\{/)
 				expect(error.stack).not.toMatch(/\}/)
-				/* eslint-enable no-regex-spaces */
 			}
 		})
 		it('includes the provided function name in the error message', () => {
@@ -339,10 +336,8 @@ describe('getAllJsxElements', () => {
 			try {
 				func(1, 2)
 			} catch (error) {
-				/* eslint-disable no-regex-spaces */
 				expect(error.message).toMatch(/Error occurred in dynamic function `foo` at line `1`:/)
 				expect(error.message).toMatch(/>>> 1: throw new Error\("This line should be highlighted."\);/)
-				/* eslint-enable no-regex-spaces */
 			}
 		})
 		it('excludes leading and trailing whitespace from the source code fragment', () => {

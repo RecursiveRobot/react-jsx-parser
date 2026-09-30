@@ -1,11 +1,7 @@
 // @ts-nocheck
-/* eslint-disable function-paren-newline, no-console, no-underscore-dangle */
 import React from 'react'
-// eslint-disable-next-line import/no-extraneous-dependencies
 import { render as rtlRender, fireEvent } from '@testing-library/react'
-// eslint-disable-next-line import/no-extraneous-dependencies
 import { vi } from 'vitest'
-// eslint-disable-next-line import/no-extraneous-dependencies
 import * as Acorn from 'acorn'
 import JsxParser from './JsxParser'
 import { JsxParserError } from '../helpers/errorUtilities'
@@ -485,7 +481,6 @@ describe('JsxParser Component', () => {
 			expect(rendered.childNodes).toHaveLength(2)
 		})
 		test('renders custom elements without requiring closing tags', () => {
-			// eslint-disable-next-line react/prefer-stateless-function
 			const CustomContent = () => <h1>Custom Content</h1>
 
 			const { rendered } = render(
@@ -502,7 +497,6 @@ describe('JsxParser Component', () => {
 			expect(rendered.getElementsByTagName('h1')[0].textContent).toEqual('Custom Content')
 		})
 		test('renders custom elements without closing tags', () => {
-			// eslint-disable-next-line react/prefer-stateless-function
 			const CustomContent = () => <h1>Ipsum</h1>
 			const CuStomContent = () => <h1>Lorem</h1>
 
@@ -609,7 +603,6 @@ describe('JsxParser Component', () => {
 		})
 		test('renders errors with renderError prop, if supplied', () => {
 			const onError = vi.fn()
-			// eslint-disable-next-line
 			const renderError = ({ error }) => <div className="error">{error}</div>
 			const { rendered } = render(
 				<JsxParser {...{ onError, renderError }} jsx="<h2>No closing tag " />,
@@ -884,7 +877,6 @@ describe('JsxParser Component', () => {
 			expect(parent.querySelector('span').getAttribute('custom')).toBeNull()
 		})
 		test('strips HTML tags if componentsOnly=true', () => {
-			// eslint-disable-next-line react/prop-types
 			const Simple = ({ children, text }) => <div>{text}{children}</div>
 			const { rendered } = render(
 				<JsxParser
@@ -908,7 +900,6 @@ describe('JsxParser Component', () => {
 	})
 	describe('whitespace', () => {
 		test('allows no-whitespace-element named custom components to take whitespace', () => {
-			// eslint-disable-next-line react/prop-types
 			const tr = ({ children }) => (<div className="tr">{children}</div>)
 			const { rendered } = render(<JsxParser components={{ tr }} jsx='<tr> <a href="/url">Text</a> </tr>' />)
 			expect(rendered.childNodes[0].nodeName).toEqual('DIV')
@@ -1286,7 +1277,6 @@ describe('JsxParser Component', () => {
 			expect(html).toMatchSnapshot()
 		})
 		describe('can evaluate multi-level property accessors', () => {
-			/* eslint-disable dot-notation,no-useless-concat */
 			const bindings = {
 				array: [{ of: 'objects' }],
 				index: 0,
@@ -1444,7 +1434,6 @@ describe('JsxParser Component', () => {
 
 				expect(onError).not.toBeCalled()
 			})
-			/* eslint-enable dot-notation,no-useless-concat */
 		})
 	})
 	describe('template strings', () => {
@@ -1452,7 +1441,6 @@ describe('JsxParser Component', () => {
 			const { rendered } = render(
 				<JsxParser
 					bindings={{ foo: 2, bar: 3 }}
-					// eslint-disable-next-line no-template-curly-in-string
 					jsx="<span>{`foo: ${foo}, bar: ${bar}, baz: ${foo * bar}`}</span>"
 				/>,
 			)
@@ -1460,7 +1448,6 @@ describe('JsxParser Component', () => {
 		})
 	})
 	describe('React.Children.only()', () => {
-		// eslint-disable-next-line react/prop-types
 		const OnlyOne = ({ children }) => (
 			<div>{React.Children.only(children)}</div>
 		)
@@ -1546,7 +1533,6 @@ describe('JsxParser Component', () => {
 	})
 	describe('void elements', () => {
 		test('void-element named custom components to take children', () => {
-			// eslint-disable-next-line react/prop-types
 			const link = ({ to, children }) => (<a href={to}>{children}</a>)
 			const { rendered } = render(<JsxParser components={{ link }} jsx='<link to="/url">Text</link>' />)
 			expect(rendered.childNodes[0].nodeName).toEqual('A')
@@ -1788,15 +1774,17 @@ describe('JsxParser Component', () => {
 		})
 
 		it('passes attributes', () => {
-			const PropTest = (props: { booleanAttribute: boolean}) => <>{`val:${props.booleanAttribute}`}</>
+			const PropTest = (props: { booleanAttribute: boolean }) => <>{`val:${props.booleanAttribute}`}</>
 			const { html, component } = render(
 				<JsxParser
 					renderInWrapper={false}
 					components={{ PropTest }}
-					bindings={{ items: [
-						{ name: 'Megeara', friend: true },
-						{ name: 'Austerious', friend: false },
-					] }}
+					bindings={{
+						items: [
+							{ name: 'Megeara', friend: true },
+							{ name: 'Austerious', friend: false },
+						],
+					}}
 					jsx="{items.map(item => <p><PropTest booleanAttribute={item.friend} /></p>)}"
 				/>,
 			)
@@ -1812,9 +1800,11 @@ describe('JsxParser Component', () => {
 				<JsxParser
 					renderInWrapper={false}
 					components={{ PropTest }}
-					bindings={{ items: [
-						{ name: 'Megeara', friend: true },
-					] }}
+					bindings={{
+						items: [
+							{ name: 'Megeara', friend: true },
+						],
+					}}
 					jsx="{items.map(item => <PropTest {...item} />)}"
 				/>,
 			)
@@ -1991,7 +1981,6 @@ describe('JsxParser Component', () => {
 					renderInWrapper={false}
 					components={{ Custom }}
 					bindings={{ items: [[1, 42], [2, 56]] }}
-					// eslint-disable-next-line no-template-curly-in-string
 					jsx="{items.map(([one, two]) => { return `${one},${two}`; }).join(';')}"
 				/>,
 			)
@@ -2016,7 +2005,6 @@ describe('JsxParser Component', () => {
 					renderInWrapper={false}
 					components={{ Custom }}
 					bindings={{ items: [{ name: 'John', lastName: 'Smith' }, { name: 'Jane', lastName: 'Doe' }] }}
-					// eslint-disable-next-line no-template-curly-in-string
 					jsx="{items.map(({ name, lastName }) => { return `${lastName}, ${name}`; }).join(';')}"
 				/>,
 			)
@@ -2041,7 +2029,6 @@ describe('JsxParser Component', () => {
 					renderInWrapper={false}
 					components={{ Custom }}
 					bindings={{ items: [{ name: 'John', lastName: 'Smith' }, { name: 'Jane', lastName: 'Doe' }] }}
-					// eslint-disable-next-line no-template-curly-in-string
 					jsx="{items.map(({ name: firstName, lastName }) => { return `${lastName}, ${firstName}`; }).join(';')}"
 				/>,
 			)
@@ -2066,7 +2053,6 @@ describe('JsxParser Component', () => {
 					renderInWrapper={false}
 					components={{ Custom }}
 					bindings={{ one: 1, two: 200, three: 300, four: 400 }}
-					// eslint-disable-next-line no-template-curly-in-string
 					jsx="{((one, two = 2, three = 3, four = 4) => { return `${one}, ${two}, ${three}, ${four}`; })(one)}"
 				/>,
 			)
@@ -2091,7 +2077,6 @@ describe('JsxParser Component', () => {
 					renderInWrapper={false}
 					components={{ Custom }}
 					bindings={{ one: 1, two: 2, three: 3, four: 4 }}
-					// eslint-disable-next-line no-template-curly-in-string
 					jsx="{((one, two, ...rest) => { return `${one}, ${two}, ${rest.join(', ')}`; })(one, two, three, four)}"
 				/>,
 			)
@@ -2116,7 +2101,6 @@ describe('JsxParser Component', () => {
 					renderInWrapper={false}
 					components={{ Custom }}
 					bindings={{ object: { name: 'John' }, array: [1, 42], string: undefined, number: 42, anotherString: 'Another String Value' }}
-					// eslint-disable-next-line no-template-curly-in-string
 					jsx="{(({ name }, [one, two], lastName = 'Smith', ...rest) => { return `${lastName}, ${name} - [${one}, ${two}] - ${rest[0]} - ${rest[1]}`; })(object, array, string, number, anotherString)}"
 				/>,
 			)
@@ -2133,7 +2117,7 @@ describe('JsxParser Component', () => {
 				<JsxParser
 					renderInWrapper={false}
 					components={{ Custom }}
-					bindings={{ }}
+					bindings={{}}
 					jsx={jsx}
 				/>,
 			)
@@ -2180,7 +2164,7 @@ describe('JsxParser Component', () => {
 				<JsxParser
 					renderInWrapper={false}
 					components={{ Custom }}
-					bindings={{ }}
+					bindings={{}}
 					jsx={jsx}
 				/>,
 			)
@@ -2204,7 +2188,7 @@ describe('JsxParser Component', () => {
 				<JsxParser
 					renderInWrapper={false}
 					components={{ Custom }}
-					bindings={{ }}
+					bindings={{}}
 					jsx={jsx}
 				/>,
 			)
@@ -2295,8 +2279,7 @@ describe('JsxParser Component', () => {
 				<JsxParser
 					renderInWrapper={false}
 					components={{ Custom }}
-					bindings={{ }}
-					// eslint-disable-next-line no-template-curly-in-string
+					bindings={{}}
 					jsx={jsx}
 				/>,
 			)
@@ -2325,7 +2308,6 @@ describe('JsxParser Component', () => {
 					renderInWrapper={false}
 					components={{ Custom }}
 					bindings={{ foo: 5, bar: 10, baz: 15 }}
-					// eslint-disable-next-line no-template-curly-in-string
 					jsx={jsx}
 				/>,
 			)
@@ -2351,7 +2333,6 @@ describe('JsxParser Component', () => {
 					renderInWrapper={false}
 					components={{ Custom }}
 					bindings={{ foo: 5, bar: 10 }}
-					// eslint-disable-next-line no-template-curly-in-string
 					jsx={jsx}
 				/>,
 			)
@@ -2359,7 +2340,6 @@ describe('JsxParser Component', () => {
 		})
 
 		it('supports JSX elements inside block-bodied functions - kitchen sink', () => {
-			// eslint-disable-next-line no-template-curly-in-string
 			const jsx = `{
 				((foo, bar) => {
 					const { baz } = this;
@@ -2391,7 +2371,6 @@ describe('JsxParser Component', () => {
 					renderInWrapper={false}
 					components={{ Custom }}
 					bindings={{ foo: 5, bar: 10, baz: 15, renderQux: () => <JsxParser renderInWrapper={false} jsx="<span>qux: {qux}</span>" bindings={{ qux: 20 }} /> }}
-					// eslint-disable-next-line no-template-curly-in-string
 					jsx={jsx}
 				/>,
 			)
